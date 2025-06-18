@@ -3,11 +3,10 @@ import 'package:get/get.dart';
 import 'package:get_storage/get_storage.dart';
 
 class ThemeController extends GetxController {
-  final GetStorage _box = GetStorage();
-  final String _themeModeKey = 'themeMode';
-  final String _customThemeKey = 'customTheme';
+  final _box = GetStorage();
+  final _themeModeKey = 'themeMode';
+  final _customThemeKey = 'customTheme';
 
-  // Reactive variables for theme mode and custom theme name
   Rx<ThemeMode> themeMode = ThemeMode.system.obs;
   RxString currentCustomTheme = ''.obs;
 
@@ -15,10 +14,8 @@ class ThemeController extends GetxController {
   void onInit() {
     super.onInit();
     themeMode.value = _loadThemeMode();
-    currentCustomTheme.value = _loadCustomTheme();
-
-    // Apply the loaded theme
-    Get.changeThemeMode(themeMode.value);
+    currentCustomTheme.value = _box.read(_customThemeKey) ?? '';
+    _applyTheme();
   }
 
   ThemeMode _loadThemeMode() {
@@ -33,39 +30,26 @@ class ThemeController extends GetxController {
     }
   }
 
-  String _loadCustomTheme() {
-    return _box.read(_customThemeKey) ?? '';
-  }
-
   void setThemeMode(ThemeMode mode) {
     themeMode.value = mode;
-    Get.changeThemeMode(mode);
-    _box.write(_themeModeKey, mode.toString().split('.').last);
-
-    // Clear custom theme when changing ThemeMode
-    clearCustomTheme();
-
-    debugPrint("Theme mode changed to: $mode");
+    currentCustomTheme.value = ''; // Reset custom theme
+    _saveThemeMode(mode);
+    _applyTheme();
   }
 
   void setCustomTheme(String themeName) {
     currentCustomTheme.value = themeName;
-
-    // When a custom theme is selected, force light mode for proper display
-    themeMode.value = ThemeMode.light;
-    Get.changeThemeMode(ThemeMode.light);
-
     _box.write(_customThemeKey, themeName);
-    _box.write(_themeModeKey, 'light'); // Save light mode as active
-
-    debugPrint("Custom theme set to: $themeName");
+    _applyTheme();
   }
 
-  void clearCustomTheme() {
-    if (currentCustomTheme.value.isNotEmpty) {
-      currentCustomTheme.value = '';
-      _box.remove(_customThemeKey);
-      debugPrint("Custom theme cleared");
-    }
+  void _applyTheme() {
+    Get.changeThemeMode(
+      currentCustomTheme.value.isEmpty ? themeMode.value : ThemeMode.light,
+    );
+  }
+
+  void _saveThemeMode(ThemeMode mode) {
+    _box.write(_themeModeKey, mode.toString().split('.').last);
   }
 }
