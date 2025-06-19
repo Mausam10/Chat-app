@@ -1,22 +1,26 @@
 import 'package:chat_app/app/controllers/login_controller.dart';
 import 'package:chat_app/app/screens/auth/register_screen.dart';
+import 'package:chat_app/app/screens/home/home_screen.dart'; // Add this import
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:chat_app/app/themes/theme_selector_sheet.dart';
 
 class LoginScreen extends StatelessWidget {
-  final controller = Get.put(LoginController());
-
-  final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
-  final RxBool isPasswordHidden = true.obs;
+  const LoginScreen({super.key}); // Added const constructor
 
   @override
   Widget build(BuildContext context) {
+    // Initialize controller
+    final controller = Get.put(LoginController());
+
+    // Initialize text controllers
+    final emailController = TextEditingController();
+    final passwordController = TextEditingController();
+    final RxBool isPasswordHidden = true.obs;
+
     // Get theme colors
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -94,7 +98,7 @@ class LoginScreen extends StatelessWidget {
             ),
             const SizedBox(height: 40),
 
-            // Email Field with theme styling
+            // Email Field
             TextField(
               controller: emailController,
               keyboardType: TextInputType.emailAddress,
@@ -135,7 +139,7 @@ class LoginScreen extends StatelessWidget {
             ),
             const SizedBox(height: 24),
 
-            // Password Field with theme styling
+            // Password Field
             Obx(
               () => TextField(
                 controller: passwordController,
@@ -195,7 +199,7 @@ class LoginScreen extends StatelessWidget {
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () {
-                  // Handle forgot password
+                  // TODO: Implement forgot password functionality
                 },
                 child: Text(
                   "Forgot Password?",
@@ -208,7 +212,7 @@ class LoginScreen extends StatelessWidget {
             ),
             const SizedBox(height: 24),
 
-            // Sign In Button with theme styling
+            // Sign In Button - Updated with clean navigation
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -226,16 +230,8 @@ class LoginScreen extends StatelessWidget {
                     colorScheme.onPrimary.withValues(alpha: 0.1),
                   ),
                 ),
-                onPressed: () {
-                  Get.snackbar(
-                    "Login",
-                    "Sign in pressed!",
-                    backgroundColor: colorScheme.primary,
-                    colorText: colorScheme.onPrimary,
-                    borderRadius: 12,
-                    margin: const EdgeInsets.all(16),
-                  );
-                },
+                onPressed:
+                    () => _handleLogin(emailController, passwordController),
                 child: Text(
                   "Sign In",
                   style: TextStyle(
@@ -291,9 +287,7 @@ class LoginScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    onPressed: () {
-                      // Handle Google sign in
-                    },
+                    onPressed: () => _handleGoogleSignIn(),
                     icon: Icon(
                       Icons.g_mobiledata,
                       color: colorScheme.onSurface,
@@ -320,9 +314,7 @@ class LoginScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    onPressed: () {
-                      // Handle Apple sign in
-                    },
+                    onPressed: () => _handleAppleSignIn(),
                     icon: Icon(
                       Icons.apple,
                       color: colorScheme.onSurface,
@@ -341,15 +333,10 @@ class LoginScreen extends StatelessWidget {
             ),
             const SizedBox(height: 32),
 
-            // Create Account Text with theme styling
+            // Create Account Text
             Center(
               child: TextButton(
-                onPressed: () {
-                  Get.to(
-                    () => RegisterScreen(),
-                    arguments: "Data received from first screen",
-                  );
-                },
+                onPressed: () => _navigateToRegister(),
                 child: Text.rich(
                   TextSpan(
                     text: "Don't have an account? ",
@@ -360,7 +347,6 @@ class LoginScreen extends StatelessWidget {
                     children: [
                       TextSpan(
                         text: "Create Account",
-
                         style: TextStyle(
                           color: colorScheme.primary,
                           fontWeight: FontWeight.w600,
@@ -375,6 +361,67 @@ class LoginScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  void _handleLogin(
+    TextEditingController emailController,
+    TextEditingController passwordController,
+  ) {
+    final email = emailController.text.trim();
+    final password = passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      Get.snackbar(
+        "Error",
+        "Please fill in all fields",
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Get.theme.colorScheme.error,
+        colorText: Get.theme.colorScheme.onError,
+        borderRadius: 12,
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 2),
+      );
+      return;
+    }
+
+    final loginController = Get.find<LoginController>();
+    loginController.loginUser(email, password);
+  }
+
+  // Handle Google Sign In
+  void _handleGoogleSignIn() {
+    // TODO: Implement Google Sign In logic
+    Get.snackbar(
+      "Info",
+      "Google Sign In not implemented yet",
+      snackPosition: SnackPosition.BOTTOM,
+      backgroundColor: Get.theme.colorScheme.secondary,
+      colorText: Get.theme.colorScheme.onSecondary,
+      borderRadius: 12,
+      margin: const EdgeInsets.all(16),
+    );
+  }
+
+  // Handle Apple Sign In
+  void _handleAppleSignIn() {
+    // TODO: Implement Apple Sign In logic
+    Get.snackbar(
+      "Info",
+      "Apple Sign In not implemented yet",
+      snackPosition: SnackPosition.BOTTOM,
+      backgroundColor: Get.theme.colorScheme.secondary,
+      colorText: Get.theme.colorScheme.onSecondary,
+      borderRadius: 12,
+      margin: const EdgeInsets.all(16),
+    );
+  }
+
+  // Navigate to Register Screen
+  void _navigateToRegister() {
+    Get.to(
+      () => RegisterScreen(),
+      arguments: "Data received from login screen",
     );
   }
 }

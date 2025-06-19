@@ -1,16 +1,19 @@
-import 'package:chat_app/app/themes/app_theme.dart';
-import 'package:flutter/material.dart';
-import 'package:get/get.dart';
-import 'package:get_storage/get_storage.dart';
-
 import 'package:chat_app/app/controllers/theme_controller.dart';
 import 'package:chat_app/app/screens/auth/login_screen.dart';
 import 'package:chat_app/app/screens/auth/register_screen.dart';
+import 'package:chat_app/app/screens/home/home_screen.dart';
+import 'package:chat_app/app/themes/app_theme.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:get/get.dart';
+import 'package:get_storage/get_storage.dart';
 
-void main() async {
+Future<void> main() async {
+  await dotenv.load(fileName: "assets/.env");
   WidgetsFlutterBinding.ensureInitialized();
   await GetStorage.init();
   Get.put(ThemeController());
+
   runApp(MyApp());
 }
 
@@ -49,6 +52,7 @@ class MyApp extends StatelessWidget {
         getPages: [
           GetPage(name: '/LoginScreen', page: () => LoginScreen()),
           GetPage(name: '/RegisterScreen', page: () => RegisterScreen()),
+          GetPage(name: '/HomeScreen', page: () => HomeScreen()),
         ],
       );
     });
