@@ -16,7 +16,7 @@ class UserController extends GetxController {
       final token = storage.read('auth_token');
 
       final response = await http.get(
-        Uri.parse("http://192.168.56.1:5001/users"),
+        Uri.parse("http://192.168.56.1/api/messages/users"),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

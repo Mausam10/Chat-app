@@ -5,10 +5,8 @@ import 'package:get_storage/get_storage.dart';
 import '../models/user_model.dart';
 
 class HomeController extends GetxController {
-  final RxList<UserModel> users = <UserModel>[].obs;
-  final RxBool isLoading = false.obs;
-  final RxString welcomeMessage = "Welcome to Home Screen!".obs;
-
+  final users = <UserModel>[].obs;
+  final isLoading = false.obs;
   final storage = GetStorage();
 
   Future<void> fetchUsers() async {
@@ -16,50 +14,52 @@ class HomeController extends GetxController {
       isLoading.value = true;
 
       final token = storage.read('auth_token');
-      if (token == null) {
-        Get.snackbar("Unauthorized", "Token not found");
+      if (token == null || token.toString().trim().isEmpty) {
+        Get.snackbar("Unauthorized", "Please login first");
+        await Future.delayed(Duration(milliseconds: 200));
+        Get.offAllNamed('/LoginScreen');
         return;
       }
 
       final response = await http.get(
-        Uri.parse(
-          'http://192.168.56.1:5001/users',
-        ), // replace with correct route
+        Uri.parse('http://192.168.56.1/api/users'),
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
         },
       );
 
       if (response.statusCode == 200) {
         final List data = jsonDecode(response.body);
-        users.assignAll(data.map((json) => UserModel.fromJson(json)).toList());
+
+        // Validate response format
+        if (data is List) {
+          users.assignAll(
+            data.map((json) => UserModel.fromJson(json)).toList(),
+          );
+        } else {
+          Get.snackbar("Unexpected Response", "Server returned invalid data.");
+        }
+      } else if (response.statusCode == 401) {
+        Get.snackbar("Unauthorized", "Session expired, please login again");
+        await storage.remove('auth_token');
+        await Future.delayed(Duration(milliseconds: 200));
+        Get.offAllNamed('/LoginScreen');
       } else {
-        print(
-          "Failed to fetch users: ${response.statusCode} - ${response.body}",
-        );
-        Get.snackbar("Error", "Failed to load users");
+        Get.snackbar("Error", "Failed to load users (${response.statusCode})");
+        print("Failed response: ${response.body}");
       }
     } catch (e) {
-      print("Exception in fetchUsers: $e");
-      Get.snackbar("Error", "Something went wrong");
+      print("Fetch users error: $e");
+      Get.snackbar("Error", "Something went wrong while loading users.");
     } finally {
       isLoading.value = false;
     }
   }
 
-  void updateWelcomeMessage(String newMessage) {
-    welcomeMessage.value = newMessage;
-  }
-
   @override
   void onInit() {
     super.onInit();
-    fetchUsers(); // Fetch users on controller initialization
-  }
-
-  @override
-  void onClose() {
-    super.onClose();
+    fetchUsers(); // Automatically called when controller is created
   }
 }
