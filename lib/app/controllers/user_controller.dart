@@ -2,21 +2,33 @@ import 'dart:convert';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:get_storage/get_storage.dart';
-import '../models/user_model.dart';
 
-class UserController extends GetxController {
+import '../models/user_model.dart'; // Your user model import
+
+class UsersController extends GetxController {
   final RxList<UserModel> users = <UserModel>[].obs;
-  final isLoading = false.obs;
+  final RxBool isLoading = false.obs;
 
   final storage = GetStorage();
+  final String baseUrl = "http://192.168.56.1:5001/api/users";
 
   Future<void> fetchUsers() async {
+    final token = storage.read('auth_token');
+    if (token == null || token.isEmpty) {
+      Get.snackbar(
+        "Unauthorized",
+        "Please login first",
+        backgroundColor: Get.theme.colorScheme.error,
+        colorText: Get.theme.colorScheme.onError,
+      );
+      return;
+    }
+
     try {
       isLoading.value = true;
-      final token = storage.read('auth_token');
 
       final response = await http.get(
-        Uri.parse("http://192.168.56.1/api/messages/users"),
+        Uri.parse(baseUrl),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -25,20 +37,34 @@ class UserController extends GetxController {
 
       if (response.statusCode == 200) {
         final List data = jsonDecode(response.body);
-        users.assignAll(data.map((json) => UserModel.fromJson(json)).toList());
+        users.value = data.map((json) => UserModel.fromJson(json)).toList();
+      } else if (response.statusCode == 401) {
+        Get.snackbar(
+          "Unauthorized",
+          "Session expired, please login again",
+          backgroundColor: Get.theme.colorScheme.error,
+          colorText: Get.theme.colorScheme.onError,
+        );
+        // Optional: clear storage and redirect to login
+        await storage.erase();
+        Get.offAllNamed('/LoginScreen');
       } else {
-        print("Failed to fetch users: ${response.body}");
+        Get.snackbar(
+          "Error",
+          "Failed to fetch users. Status: ${response.statusCode}",
+          backgroundColor: Get.theme.colorScheme.error,
+          colorText: Get.theme.colorScheme.onError,
+        );
       }
     } catch (e) {
-      print("Error fetching users: $e");
+      Get.snackbar(
+        "Error",
+        "An unexpected error occurred: $e",
+        backgroundColor: Get.theme.colorScheme.error,
+        colorText: Get.theme.colorScheme.onError,
+      );
     } finally {
       isLoading.value = false;
     }
-  }
-
-  @override
-  void onInit() {
-    fetchUsers();
-    super.onInit();
   }
 }

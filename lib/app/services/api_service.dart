@@ -22,6 +22,7 @@ class ApiService {
     }
   }
 
+  // Existing login method
   static Future<Map<String, dynamic>> loginUser(
     String email,
     String password,

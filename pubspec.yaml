@@ -40,6 +40,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   socket_io: ^1.0.1
   socket_io_client: ^1.0.2
+  flutter_webrtc: ^0.14.1
+  flutter_local_notifications: ^19.3.0
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

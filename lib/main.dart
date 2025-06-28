@@ -1,7 +1,10 @@
+import 'package:chat_app/app/controllers/message_controller.dart';
 import 'package:chat_app/app/controllers/theme_controller.dart';
 import 'package:chat_app/app/screens/auth/login_screen.dart';
 import 'package:chat_app/app/screens/auth/register_screen.dart';
+import 'package:chat_app/app/screens/chat/chat_screen.dart';
 import 'package:chat_app/app/screens/home/home_screen.dart';
+import 'package:chat_app/app/services/socket_service.dart';
 import 'package:chat_app/app/themes/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -10,10 +13,12 @@ import 'package:get_storage/get_storage.dart';
 
 Future<void> main() async {
   await dotenv.load(fileName: "assets/.env");
+  await Get.putAsync(() => SocketService().init());
   WidgetsFlutterBinding.ensureInitialized();
+
   await GetStorage.init();
   Get.put(ThemeController());
-
+  Get.put(MessageController());
   runApp(MyApp());
 }
 
@@ -53,6 +58,7 @@ class MyApp extends StatelessWidget {
           GetPage(name: '/LoginScreen', page: () => LoginScreen()),
           GetPage(name: '/RegisterScreen', page: () => RegisterScreen()),
           GetPage(name: '/HomeScreen', page: () => HomeScreen()),
+          GetPage(name: '/ChatScreen', page: () => ChatScreen()),
         ],
       );
     });
