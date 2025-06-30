@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
+
 import 'package:chat_app/app/screens/home/home_screen.dart';
 import 'package:chat_app/app/utils/safe_navigator.dart';
+import 'package:flutter/foundation.dart'; // for kIsWeb
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:get_storage/get_storage.dart';
@@ -11,10 +13,17 @@ class LoginController extends GetxController {
   final isLoading = false.obs;
   final storage = GetStorage();
 
-  Future<void> loginUser(String email, String password) async {
-    final url = Uri.parse("http://localhost:5001/api/auth/login"); //for web
-    // final url = Uri.parse("http://192.168.56.1/api/auth/login"); //for emulator
+  /// Returns true on success, false on failure
+  Future<bool> loginUser(String email, String password) async {
+    // Dynamic base URL based on platform
+    final String baseUrl =
+        kIsWeb
+            ? "http://192.168.56.1:5001" // for web (use your PC's IP)
+            : Platform.isAndroid
+            ? "http://10.0.2.2:5001" // Android emulator
+            : "http://localhost:5001"; // iOS or desktop
 
+    final Uri url = Uri.parse("$baseUrl/api/auth/login");
     try {
       isLoading.value = true;
 
@@ -40,12 +49,12 @@ class LoginController extends GetxController {
             backgroundColor: Get.theme.colorScheme.error,
             colorText: Get.theme.colorScheme.onError,
           );
-          return;
+          return false;
         }
 
         final data = jsonDecode(response.body);
 
-        // Save token if present (optional)
+        // Save token if present
         final token = data['token'];
         if (token != null) {
           await storage.write('auth_token', token);
@@ -55,7 +64,12 @@ class LoginController extends GetxController {
         await storage.write('user_id', data['_id']);
         await storage.write('user_fullName', data['fullName']);
         await storage.write('user_email', data['email']);
-        await storage.write('user_profilePic', data['profilePic']);
+        await storage.write(
+          'user_profilePic',
+          data['profilePic']?.toString().isNotEmpty == true
+              ? data['profilePic']
+              : null, // null-safe fallback
+        );
 
         // Delay snackbar and navigation to avoid _debugLocked error
         Future.delayed(Duration.zero, () {
@@ -67,17 +81,24 @@ class LoginController extends GetxController {
             colorText: Get.theme.colorScheme.onPrimary,
           );
 
-          // Further delay navigation so snackbar gets rendered cleanly
           SafeNavigator.to(() => HomeScreen());
         });
+
+        return true;
       } else {
-        final data = jsonDecode(response.body);
+        final errorMessage =
+            response.body.isNotEmpty
+                ? (jsonDecode(response.body)['message'] ??
+                    'Invalid credentials or server error')
+                : 'Login failed. Please try again.';
+
         Get.snackbar(
           "Login Failed",
-          data["message"] ?? "Invalid credentials or server error",
+          errorMessage,
           backgroundColor: Get.theme.colorScheme.error,
           colorText: Get.theme.colorScheme.onError,
         );
+        return false;
       }
     } on SocketException {
       Get.snackbar(
@@ -86,6 +107,7 @@ class LoginController extends GetxController {
         backgroundColor: Get.theme.colorScheme.error,
         colorText: Get.theme.colorScheme.onError,
       );
+      return false;
     } on TimeoutException {
       Get.snackbar(
         "Timeout",
@@ -93,6 +115,7 @@ class LoginController extends GetxController {
         backgroundColor: Get.theme.colorScheme.error,
         colorText: Get.theme.colorScheme.onError,
       );
+      return false;
     } catch (e, stack) {
       print("Login error: $e\n$stack");
       Get.snackbar(
@@ -101,6 +124,7 @@ class LoginController extends GetxController {
         backgroundColor: Get.theme.colorScheme.error,
         colorText: Get.theme.colorScheme.onError,
       );
+      return false;
     } finally {
       isLoading.value = false;
     }

@@ -1,65 +1,81 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:get/get.dart';
-import 'package:get_storage/get_storage.dart';
 
-class SocketService extends GetxService {
+class SocketService {
   late IO.Socket socket;
-  final storage = GetStorage();
+  final String userId;
 
-  Future<SocketService> init() async {
-    final userId = storage.read('user_id');
+  SocketService({required this.userId});
 
-    socket = IO.io('http://192.168.56.1:5001', <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': false,
-      'forceNew': true,
-    });
+  void connect() {
+    print("Connecting to socket with userId: $userId");
+
+    socket = IO.io(
+      'http://localhost:5001',
+      IO.OptionBuilder()
+          .setTransports(['polling', 'websocket'])
+          .enableAutoConnect() // Try enabling auto-connect
+          .setQuery({'userId': userId})
+          .setTimeout(5000) // Add timeout
+          .build(),
+    );
 
     socket.connect();
 
     socket.onConnect((_) {
-      print('🔌 Socket connected');
-      socket.emit('user_connected', userId);
+      print('Socket connected as $userId');
     });
 
-    socket.onDisconnect((_) => print('🛑 Socket disconnected'));
+    socket.onConnectError((error) {
+      print('Connect error: $error');
+    });
 
-    return this;
+    socket.onError((error) {
+      print('Socket error: $error');
+    });
+
+    socket.onDisconnect((_) {
+      print('Socket disconnected');
+    });
+
+    socket.on('getOnlineUsers', (data) {
+      print('Online users: $data');
+    });
+
+    socket.on('user-joined', (data) {
+      print('User joined room: $data');
+    });
+
+    socket.on('offer', (data) {
+      print('Offer received: $data');
+    });
+
+    socket.on('answer', (data) {
+      print('Answer received: $data');
+    });
+
+    socket.on('ice-candidate', (data) {
+      print('❄️ ICE candidate received: $data');
+    });
   }
 
-  void sendMessage(Map<String, dynamic> message) {
-    socket.emit('message:new', message);
+  void disconnect() {
+    socket.disconnect();
+    print("🚪 Socket disconnected manually.");
   }
 
-  void onMessageReceive(Function(dynamic) handler) {
-    socket.on('message:receive', handler);
+  void joinRoom(String roomId) {
+    socket.emit('join-room', {'roomId': roomId, 'userId': userId});
   }
 
-  void sendCallOffer(Map<String, dynamic> offer) {
-    socket.emit('call:offer', offer);
+  void sendOffer(String toUserId, Map<String, dynamic> offer) {
+    socket.emit('offer', {'offer': offer, 'to': toUserId});
   }
 
-  void onCallOffer(Function(dynamic) handler) {
-    socket.on('call:offer', handler);
+  void sendAnswer(String toUserId, Map<String, dynamic> answer) {
+    socket.emit('answer', {'answer': answer, 'to': toUserId});
   }
 
-  void sendCallAnswer(Map<String, dynamic> answer) {
-    socket.emit('call:answer', answer);
-  }
-
-  void onCallAnswer(Function(dynamic) handler) {
-    socket.on('call:answer', handler);
-  }
-
-  void sendIceCandidate(Map<String, dynamic> candidate) {
-    socket.emit('call:ice-candidate', candidate);
-  }
-
-  void onIceCandidate(Function(dynamic) handler) {
-    socket.on('call:ice-candidate', handler);
-  }
-
-  void disposeService() {
-    socket.dispose();
+  void sendIceCandidate(String toUserId, Map<String, dynamic> candidate) {
+    socket.emit('ice-candidate', {'candidate': candidate, 'to': toUserId});
   }
 }

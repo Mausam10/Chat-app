@@ -13,9 +13,7 @@ import 'package:get_storage/get_storage.dart';
 
 Future<void> main() async {
   await dotenv.load(fileName: "assets/.env");
-  await Get.putAsync(() => SocketService().init());
   WidgetsFlutterBinding.ensureInitialized();
-
   await GetStorage.init();
   Get.put(ThemeController());
   Get.put(MessageController());

@@ -1,8 +1,8 @@
 import 'dart:convert';
+import 'package:chat_app/app/services/socket_service.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:get_storage/get_storage.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/user_model.dart';
 
 class HomeController extends GetxController {
@@ -11,51 +11,39 @@ class HomeController extends GetxController {
 
   final RxBool isLoading = false.obs;
   final storage = GetStorage();
-  late IO.Socket socket;
+
+  late final SocketService socketService;
 
   String? get currentUserId => storage.read('user_id');
-  bool get isAdmin => storage.read('user_isAdmin') ?? false;
 
-  // Connect to socket
-  void initSocketConnection() {
+  @override
+  void onInit() {
+    super.onInit();
+    initSocket();
+    fetchUsers();
+  }
+
+  void initSocket() {
     final userId = currentUserId;
-    if (userId == null) {
-      print("No userId found, socket connection not initialized.");
-      return;
+    if (userId != null && userId.isNotEmpty) {
+      socketService = Get.put(SocketService(userId: userId));
+      socketService.connect();
+
+      socketService.socket.on("getOnlineUsers", (data) {
+        if (data is List) {
+          onlineUserIds.assignAll(data.cast<String>());
+          print("✅ Online users updated: $onlineUserIds");
+        }
+      });
+    } else {
+      print("⚠️ Cannot initialize socket: userId not found.");
     }
+  }
 
-    socket = IO.io(
-      'http://192.168.56.1:5001',
-      IO.OptionBuilder()
-          .setTransports(['websocket'])
-          .disableAutoConnect()
-          .setQuery({'userId': userId})
-          .build(),
-    );
-
-    socket.connect();
-
-    socket.onConnect((_) {
-      print("Connected to socket server as $userId");
-      Get.snackbar("Socket", "Connected to server");
-    });
-
-    socket.on("getOnlineUsers", (data) {
-      print("Received online users from socket: $data");
-      if (data is List) {
-        onlineUserIds.assignAll(data.cast<String>());
-      }
-    });
-
-    socket.onDisconnect((_) {
-      print("Disconnected from socket");
-      Get.snackbar("Socket", "Disconnected from server");
-    });
-
-    socket.onError((err) {
-      print("Socket error: $err");
-      Get.snackbar("Socket Error", err.toString());
-    });
+  @override
+  void onClose() {
+    socketService.disconnect();
+    super.onClose();
   }
 
   Future<void> fetchUsers() async {
@@ -105,18 +93,5 @@ class HomeController extends GetxController {
     } finally {
       isLoading.value = false;
     }
-  }
-
-  @override
-  void onInit() {
-    super.onInit();
-    fetchUsers();
-    initSocketConnection();
-  }
-
-  @override
-  void onClose() {
-    socket.dispose();
-    super.onClose();
   }
 }
