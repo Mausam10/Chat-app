@@ -4,6 +4,8 @@ import 'package:chat_app/app/screens/auth/login_screen.dart';
 import 'package:chat_app/app/screens/auth/register_screen.dart';
 import 'package:chat_app/app/screens/chat/chat_screen.dart';
 import 'package:chat_app/app/screens/home/home_screen.dart';
+import 'package:chat_app/app/screens/onboarding/onboarding_screen.dart';
+import 'package:chat_app/app/screens/splash/splash_screen.dart';
 import 'package:chat_app/app/services/socket_service.dart';
 import 'package:chat_app/app/themes/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -31,7 +33,7 @@ class MyApp extends StatelessWidget {
 
       return GetMaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Lets-Chat',
+        title: 'Lets Chat',
 
         // Use ThemeMode only if no custom theme is selected
         themeMode: customTheme.isEmpty ? mode : ThemeMode.light,
@@ -51,8 +53,13 @@ class MyApp extends StatelessWidget {
           );
         },
 
-        initialRoute: '/LoginScreen',
+        initialRoute: '/splashScreen',
         getPages: [
+          GetPage(name: '/splashScreen', page: () => const SplashScreen()),
+          GetPage(
+            name: '/onboardingScreen',
+            page: () => const OnboardingScreen(),
+          ),
           GetPage(name: '/LoginScreen', page: () => LoginScreen()),
           GetPage(name: '/RegisterScreen', page: () => RegisterScreen()),
           GetPage(name: '/HomeScreen', page: () => HomeScreen()),
