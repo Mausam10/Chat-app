@@ -18,7 +18,7 @@ class LoginController extends GetxController {
     // Dynamic base URL based on platform
     final String baseUrl =
         kIsWeb
-            ? "http://192.168.56.1:5001" // for web (use your PC's IP)
+            ? "http://192.168.1.70:5001" // for web (use your PC's IP)
             : Platform.isAndroid
             ? "http://10.0.2.2:5001" // Android emulator
             : "http://localhost:5001"; // iOS or desktop

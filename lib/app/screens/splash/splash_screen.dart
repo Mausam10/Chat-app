@@ -19,7 +19,7 @@ class SplashScreen extends StatelessWidget {
             Image.asset('assets/images/chat_logo.png', width: 120, height: 120),
             const SizedBox(height: 20),
             const Text(
-              "ChatApp",
+              "Let's Chat",
               style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),

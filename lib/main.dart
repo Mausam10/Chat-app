@@ -21,7 +21,7 @@ Future<void> main() async {
   await GetStorage.init();
   //Register SocketService before any Get.find<SocketService>() is used
   final storage = GetStorage();
-  final baseUrl = 'http://192.168.56.1:5001';
+  final baseUrl = 'http://192.168.1.70:5001';
   final authToken = storage.read('auth_token') ?? '';
   final userId = storage.read('user_id') ?? '';
 
@@ -66,13 +66,13 @@ class MyApp extends StatelessWidget {
           );
         },
 
-        initialRoute: '/splashScreen',
+        initialRoute: '/LoginScreen',
         getPages: [
-          GetPage(name: '/splashScreen', page: () => const SplashScreen()),
-          GetPage(
-            name: '/onboardingScreen',
-            page: () => const OnboardingScreen(),
-          ),
+          // GetPage(name: '/splashScreen', page: () => const SplashScreen()),
+          // GetPage(
+          //   name: '/onboardingScreen',
+          //   page: () => const OnboardingScreen(),
+          // ),
           GetPage(name: '/LoginScreen', page: () => LoginScreen()),
           GetPage(name: '/RegisterScreen', page: () => RegisterScreen()),
           GetPage(name: '/HomeScreen', page: () => HomeScreen()),

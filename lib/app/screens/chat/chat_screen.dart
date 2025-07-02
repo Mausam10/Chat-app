@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:get_storage/get_storage.dart';
+import 'package:mime/mime.dart';
 
 import '../../controllers/message_controller.dart';
 import '../../widgets/emoji_input.dart';
@@ -21,14 +22,91 @@ class _ChatScreenState extends State<ChatScreen> {
   final messageController = Get.find<MessageController>();
   final textController = TextEditingController();
   final focusNode = FocusNode();
+  final scrollController = ScrollController();
   final storage = GetStorage();
-  final _scrollController = ScrollController();
 
   late String receiverId;
   late String receiverName;
 
   bool showEmojiPicker = false;
   Map<String, dynamic>? replyingTo;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final args = Get.arguments;
+    if (args == null || args['userId'] == null || args['userName'] == null) {
+      receiverId = storage.read<String>('chat_userId') ?? '';
+      receiverName = storage.read<String>('chat_userName') ?? 'Unknown';
+    } else {
+      receiverId = args['userId'];
+      receiverName = args['userName'];
+      storage.write('chat_userId', receiverId);
+      storage.write('chat_userName', receiverName);
+    }
+
+    if (receiverId.trim().isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Get.offAllNamed('/HomeScreen');
+      });
+      return;
+    }
+
+    messageController.startConversation(receiverId);
+    messageController.markMessagesAsSeen(receiverId);
+  }
+
+  @override
+  void dispose() {
+    textController.dispose();
+    focusNode.dispose();
+    storage.remove('chat_userId');
+    storage.remove('chat_userName');
+    super.dispose();
+  }
+
+  void handleSend() {
+    final text = textController.text.trim();
+    if (text.isNotEmpty) {
+      messageController.sendMessage(
+        receiverId,
+        text,
+        replyToMessageId: replyingTo?['id'],
+      );
+      textController.clear();
+      setState(() => replyingTo = null);
+      focusNode.requestFocus();
+      scrollToBottom();
+    }
+  }
+
+  void handleReaction(String messageId, String emoji) {
+    final msgIndex = messageController.chatMessages.indexWhere(
+      (m) => m['id'] == messageId,
+    );
+    if (msgIndex != -1) {
+      messageController.chatMessages[msgIndex]['reaction'] = emoji;
+      messageController.chatMessages.refresh();
+    }
+  }
+
+  void scrollToBottom({bool smooth = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (scrollController.hasClients) {
+        final pos = scrollController.position.maxScrollExtent;
+        if (smooth) {
+          scrollController.animateTo(
+            pos,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        } else {
+          scrollController.jumpTo(pos);
+        }
+      }
+    });
+  }
 
   Future<void> pickAndSendFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -39,87 +117,18 @@ class _ChatScreenState extends State<ChatScreen> {
     if (result != null && result.files.isNotEmpty) {
       final file = result.files.first;
       final base64File = base64Encode(file.bytes!);
+      final mimeType = lookupMimeType(file.name) ?? 'application/octet-stream';
 
       messageController.sendMessage(
         receiverId,
-        '', // empty text
+        '',
         base64File: base64File,
         fileName: file.name,
-        mimeType: file.extension ?? 'application/octet-stream',
+        mimeType: mimeType,
       );
+
+      scrollToBottom();
     }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-
-    final args = Get.arguments;
-
-    if (args == null || args['userId'] == null || args['userName'] == null) {
-      receiverId = storage.read<String>('chat_userId') ?? '';
-      receiverName = storage.read<String>('chat_userName') ?? 'Unknown';
-    } else {
-      receiverId = args['userId'];
-      receiverName = args['userName'];
-
-      storage.write('chat_userId', receiverId);
-      storage.write('chat_userName', receiverName);
-    }
-
-    if (receiverId.isEmpty) {
-      Future.delayed(Duration.zero, () {
-        Get.offAllNamed('/HomeScreen');
-      });
-    } else {
-      messageController.startConversation(receiverId);
-      messageController.markMessagesAsSeen(receiverId); // ✅ Mark as seen
-    }
-  }
-
-  @override
-  void dispose() {
-    storage.remove('chat_userId');
-    storage.remove('chat_userName');
-    textController.dispose();
-    focusNode.dispose();
-    super.dispose();
-  }
-
-  void handleSend() {
-    final text = textController.text.trim();
-    if (text.isNotEmpty) {
-      messageController.sendMessage(
-        receiverId,
-        text,
-        replyToMessageId: replyingTo?['id'], // ✅ Reply support
-      );
-      textController.clear();
-      setState(() => replyingTo = null);
-      focusNode.requestFocus();
-    }
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
-  void handleReaction(String messageId, String emoji) {
-    // You can expand this with socket emit or API call if needed
-    setState(() {
-      final msgIndex = messageController.chatMessages.indexWhere(
-        (m) => m['id'] == messageId,
-      );
-      if (msgIndex != -1) {
-        messageController.chatMessages[msgIndex]['reaction'] = emoji;
-        messageController.chatMessages.refresh();
-      }
-    });
   }
 
   @override
@@ -155,7 +164,6 @@ class _ChatScreenState extends State<ChatScreen> {
                             : const SizedBox(),
                   ),
 
-                  // ✅ Show reply preview
                   if (replyingTo != null)
                     Container(
                       color: Colors.grey.shade200,
@@ -184,55 +192,40 @@ class _ChatScreenState extends State<ChatScreen> {
 
                   Expanded(
                     child: Obx(() {
+                      final messages = messageController.chatMessages;
+
                       if (messageController.isLoading.value) {
                         return const Center(child: CircularProgressIndicator());
                       }
 
-                      final messages = messageController.chatMessages;
-                      // Delay scrolling slightly after rebuild
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (_scrollController.hasClients) {
-                          _scrollController.animateTo(
-                            _scrollController.position.maxScrollExtent,
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeOut,
-                          );
-                        }
-                      });
+                      scrollToBottom();
 
                       return ListView.builder(
-                        controller: _scrollController,
-                        reverse: false,
-                        padding: const EdgeInsets.all(12),
+                        controller: scrollController,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         itemCount: messages.length,
                         itemBuilder: (context, index) {
-                          final msg = messages[messages.length - 1 - index];
+                          final msg = messages[index];
                           final isMe = msg['senderId'] == myId;
 
                           return GestureDetector(
                             onLongPress: () async {
                               final selected = await showMenu<String>(
                                 context: context,
-                                position: RelativeRect.fromLTRB(
+                                position: const RelativeRect.fromLTRB(
                                   100,
                                   300,
                                   100,
                                   100,
                                 ),
-                                items: [
-                                  const PopupMenuItem(
-                                    value: "❤️",
-                                    child: Text("❤️"),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: "😂",
-                                    child: Text("😂"),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: "👍",
-                                    child: Text("👍"),
-                                  ),
-                                  const PopupMenuItem(
+                                items: const [
+                                  PopupMenuItem(value: "❤️", child: Text("❤️")),
+                                  PopupMenuItem(value: "😂", child: Text("😂")),
+                                  PopupMenuItem(value: "👍", child: Text("👍")),
+                                  PopupMenuItem(
                                     value: "reply",
                                     child: Text("Reply"),
                                   ),

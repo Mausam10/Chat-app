@@ -1,16 +1,19 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class SocketService {
+  bool _listenersRegistered = false;
+  bool _isConnecting = false;
+
   late IO.Socket socket;
   final String baseUrl;
 
-  // Callbacks
-  Function(List<String>)? _onOnlineUsersUpdated;
   Function(dynamic)? _onMessageReceived;
   Function(dynamic)? _onMessageSeen;
   Function(dynamic)? _onUserTyping;
+  Function(List<String>)? _onOnlineUsersUpdated;
 
   final List<Map<String, dynamic>> _pendingMessages = [];
+  final List<Function()> _pendingActions = [];
 
   SocketService({required this.baseUrl});
 
@@ -27,92 +30,83 @@ class SocketService {
     socket.onConnect((_) {
       print('✅ Socket connected as $userId');
 
-      // Flush pending messages
-      if (_pendingMessages.isNotEmpty) {
-        print('📤 Flushing ${_pendingMessages.length} pending messages...');
-        for (var msg in _pendingMessages) {
-          socket.emit('sendMessage', msg);
-        }
-        _pendingMessages.clear();
+      if (!_listenersRegistered) {
+        _registerListeners();
+        _listenersRegistered = true;
+      }
+
+      _isConnecting = false;
+
+      for (var msg in _pendingMessages) {
+        socket.emit('sendMessage', msg);
+      }
+      _pendingMessages.clear();
+
+      for (var action in _pendingActions) {
+        action();
+      }
+      _pendingActions.clear();
+    });
+
+    socket.onConnectError((err) {
+      print('❌ Connect error: $err');
+      _isConnecting = false;
+    });
+
+    socket.onError((err) {
+      print('❌ Socket error: $err');
+      _isConnecting = false;
+    });
+
+    socket.onDisconnect((_) {
+      print('⚠️ Socket disconnected');
+      _listenersRegistered = false;
+    });
+  }
+
+  void _registerListeners() {
+    socket.on('receiveMessage', (data) => _onMessageReceived?.call(data));
+    socket.on('messageSeen', (data) => _onMessageSeen?.call(data));
+    socket.on('userTyping', (data) => _onUserTyping?.call(data));
+    socket.on('getOnlineUsers', (data) {
+      if (data is List) {
+        _onOnlineUsersUpdated?.call(data.map((e) => e.toString()).toList());
       }
     });
-
-    socket.onConnectError((err) => print('❌ Connect error: $err'));
-    socket.onError((err) => print('❌ Socket error: $err'));
-    socket.onDisconnect((_) => print('⚠️ Socket disconnected'));
-
-    socket.on('getOnlineUsers', (data) {
-      print('👥 Online users: $data');
-      _onOnlineUsersUpdated?.call(List<String>.from(data));
-    });
-
-    socket.on('receiveMessage', (data) {
-      print('📩 Message received: $data');
-      _onMessageReceived?.call(data);
-    });
-
-    socket.on('messageSeen', (data) {
-      print('👁️ Message seen: $data');
-      _onMessageSeen?.call(data);
-    });
-
-    socket.on('userTyping', (data) {
-      print('⌨️ User typing: $data');
-      _onUserTyping?.call(data);
-    });
-
-    socket.on('user-joined', (data) => print('🔵 User joined room: $data'));
-    socket.on('user-left', (data) => print('🔴 User left room: $data'));
-
-    socket.on('offer', (data) => print('📨 Offer received: $data'));
-    socket.on('answer', (data) => print('📨 Answer received: $data'));
-    socket.on(
-      'ice-candidate',
-      (data) => print('📨 ICE candidate received: $data'),
-    );
-
-    socket.connect();
   }
 
   void connect() {
-    if (!socket.connected) {
-      print('🔌 Connecting socket...');
+    if (!socket.connected && !_isConnecting) {
+      _isConnecting = true;
       socket.connect();
     }
   }
 
   void disconnect() {
+    if (socket.connected) socket.disconnect();
+    _isConnecting = false;
+    _listenersRegistered = false;
+  }
+
+  void dispose() {
+    socket.clearListeners();
+    _listenersRegistered = false;
+    _isConnecting = false;
+  }
+
+  void onMessageReceived(Function(dynamic) callback) =>
+      _onMessageReceived = callback;
+  void onMessageSeen(Function(dynamic) callback) => _onMessageSeen = callback;
+  void onUserTyping(Function(dynamic) callback) => _onUserTyping = callback;
+  void onOnlineUsersUpdated(Function(List<String>) callback) =>
+      _onOnlineUsersUpdated = callback;
+
+  void sendMessage(Map<String, dynamic> messageData) {
     if (socket.connected) {
-      socket.disconnect();
-      print('🔌 Socket disconnected manually.');
-    }
-  }
-
-  void onOnlineUsersUpdated(Function(List<String>) callback) {
-    _onOnlineUsersUpdated = callback;
-  }
-
-  void onMessageReceived(Function(dynamic) callback) {
-    _onMessageReceived = callback;
-  }
-
-  void onMessageSeen(Function(dynamic) callback) {
-    _onMessageSeen = callback;
-  }
-
-  void onUserTyping(Function(dynamic) callback) {
-    _onUserTyping = callback;
-  }
-
-  void sendMessage(String toUserId, String message) {
-    final msgData = {'to': toUserId, 'message': message};
-    if (socket.connected) {
-      socket.emit('sendMessage', msgData);
-      print('📡 Socket message emitted: $msgData');
+      socket.emit('sendMessage', messageData);
     } else {
-      print('⚠️ Socket not connected. Queuing message...');
-      _pendingMessages.add(msgData);
-      socket.connect();
+      _pendingMessages.add(messageData);
+      connect();
     }
   }
 
@@ -120,8 +114,6 @@ class SocketService {
     final data = {'to': toUserId, 'messageId': messageId};
     if (socket.connected) {
       socket.emit('messageSeen', data);
-    } else {
-      print('⚠️ Socket not connected. Message seen event not emitted.');
     }
   }
 
@@ -129,8 +121,6 @@ class SocketService {
     final data = {'to': toUserId};
     if (socket.connected) {
       socket.emit('typing', data);
-    } else {
-      print('⚠️ Socket not connected. Typing event not sent.');
     }
   }
 
@@ -138,36 +128,9 @@ class SocketService {
     final data = {'roomId': roomId, 'userId': userId};
     if (socket.connected) {
       socket.emit('join-room', data);
-      print('✅ Joined room $roomId as user $userId');
     } else {
-      print('⚠️ Socket not connected. Join room failed.');
-    }
-  }
-
-  void sendOffer(String toUserId, Map<String, dynamic> offer) {
-    final data = {'offer': offer, 'to': toUserId};
-    if (socket.connected) {
-      socket.emit('offer', data);
-    } else {
-      print('⚠️ Socket not connected. Offer not sent.');
-    }
-  }
-
-  void sendAnswer(String toUserId, Map<String, dynamic> answer) {
-    final data = {'answer': answer, 'to': toUserId};
-    if (socket.connected) {
-      socket.emit('answer', data);
-    } else {
-      print('⚠️ Socket not connected. Answer not sent.');
-    }
-  }
-
-  void sendIceCandidate(String toUserId, Map<String, dynamic> candidate) {
-    final data = {'candidate': candidate, 'to': toUserId};
-    if (socket.connected) {
-      socket.emit('ice-candidate', data);
-    } else {
-      print('⚠️ Socket not connected. ICE candidate not sent.');
+      _pendingActions.add(() => joinRoom(roomId, userId));
+      connect();
     }
   }
 }

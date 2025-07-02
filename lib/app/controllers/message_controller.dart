@@ -6,7 +6,7 @@ import 'package:chat_app/app/services/socket_service.dart';
 
 class MessageController extends GetxController {
   final storage = GetStorage();
-
+  final Set<String> _messageIds = <String>{};
   final isLoading = false.obs;
   final RxBool isTyping = false.obs;
   final chatMessages = <Map<String, dynamic>>[].obs;
@@ -18,14 +18,13 @@ class MessageController extends GetxController {
 
   String get currentUserId => storage.read('user_id') ?? '';
 
-  final String baseUrl = 'http://192.168.56.1:5001/api';
+  final String baseUrl = 'http://192.168.1.70:5001/api';
 
   @override
   void onInit() {
     super.onInit();
     socketService = Get.find<SocketService>();
 
-    // Subscribe to socket event callbacks exposed by SocketService
     socketService.onMessageReceived(_handleIncomingMessage);
     socketService.onUserTyping(_handleTypingIndicator);
     socketService.onMessageSeen((data) {
@@ -41,6 +40,9 @@ class MessageController extends GetxController {
       final senderId = message['senderId'] ?? '';
       final receiverId = message['receiverId'] ?? '';
 
+      if (message['text'] == 'joined the room' && senderId == currentUserId)
+        return;
+
       bool isCurrentConversation =
           currentChatUserId != null &&
           ((senderId == currentChatUserId && receiverId == currentUserId) ||
@@ -50,9 +52,8 @@ class MessageController extends GetxController {
         isCurrentConversation = true;
       }
 
-      if (isCurrentConversation && !_isDuplicateMessage(message)) {
-        chatMessages.insert(0, message);
-        chatMessages.refresh();
+      if (isCurrentConversation) {
+        _addMessage(message);
       }
     }
   }
@@ -70,16 +71,13 @@ class MessageController extends GetxController {
   }
 
   Map<String, dynamic> _normalizeMessageFormat(Map<String, dynamic> data) {
-    var normalized = Map<String, dynamic>.from(data);
+    final normalized = Map<String, dynamic>.from(data);
 
     if (data.containsKey('message') && data.containsKey('from')) {
-      normalized = {
-        'text': data['message'],
-        'senderId': data['from'],
-        'receiverId': currentUserId,
-        'timestamp': data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
-        ...data,
-      };
+      normalized['text'] = data['message'];
+      normalized['senderId'] = data['from'];
+      normalized['receiverId'] ??= currentUserId;
+      normalized['timestamp'] ??= DateTime.now().toIso8601String();
     }
 
     return normalized;
@@ -89,35 +87,41 @@ class MessageController extends GetxController {
     return msg.containsKey('text') || msg.containsKey('image');
   }
 
-  bool _isDuplicateMessage(Map<String, dynamic> newMsg) {
-    final newId = newMsg['id'] ?? newMsg['_id'];
-    if (newId == null) return false;
-
-    return chatMessages.any((existingMsg) {
-      final existingId = existingMsg['id'] ?? existingMsg['_id'];
-      return existingId == newId;
-    });
+  bool _isDuplicateMessage(Map<String, dynamic> msg) {
+    final id = msg['id'] ?? msg['_id'];
+    if (id == null || _messageIds.contains(id)) return true;
+    _messageIds.add(id);
+    return false;
   }
 
-  void startConversation(String userId, {bool isGroup = false}) {
-    currentChatUserId = userId;
-    chatMessages.clear();
-
-    // Join the chat room
-    String roomId;
-    if (isGroup) {
-      roomId = 'group_$userId';
-    } else {
-      final ids = [currentUserId, userId]..sort();
-      roomId = 'chat_${ids.join('_')}';
+  void _addMessage(Map<String, dynamic> msg) {
+    final message = _normalizeMessageFormat(msg);
+    if (_isValidMessage(message) && !_isDuplicateMessage(message)) {
+      chatMessages.add(message);
+      chatMessages.refresh();
     }
-    socketService.joinRoom(roomId, currentUserId);
+  }
 
+  void startConversation(String userId) {
+    if (currentChatUserId != userId) {
+      chatMessages.clear();
+      _messageIds.clear();
+    }
+
+    currentChatUserId = userId;
+
+    final sorted = [currentUserId, userId]..sort();
+    final roomName = 'chat_${sorted.join("_")}';
+
+    socketService.joinRoom(roomName, currentUserId);
     fetchMessages(userId);
   }
 
   Future<void> fetchMessages(String userId) async {
     isLoading.value = true;
+    chatMessages.clear();
+    _messageIds.clear();
+
     try {
       final token = storage.read('auth_token');
       if (token == null) throw Exception('No auth token');
@@ -132,7 +136,18 @@ class MessageController extends GetxController {
 
       if (res.statusCode == 200) {
         final List data = json.decode(res.body);
-        chatMessages.value = data.cast<Map<String, dynamic>>();
+
+        data.sort((a, b) {
+          final aTime =
+              DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+          final bTime =
+              DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+          return aTime.compareTo(bTime);
+        });
+
+        for (var msg in data) {
+          _addMessage(msg);
+        }
       } else {
         print('Failed to load messages: ${res.statusCode}');
       }
@@ -207,13 +222,23 @@ class MessageController extends GetxController {
 
       if (res.statusCode == 200 || res.statusCode == 201) {
         final newMessage = json.decode(res.body);
-        if (!_isDuplicateMessage(newMessage)) {
-          chatMessages.insert(0, newMessage);
-          chatMessages.refresh();
-        }
+        _addMessage(newMessage);
 
-        // Emit socket event via SocketService
-        socketService.sendMessage(receiverId, text);
+        socketService.sendMessage({
+          'from': currentUserId,
+          'to': receiverId,
+          'message': text,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+          if (base64Image != null && base64Image.isNotEmpty)
+            'image': base64Image,
+          if (base64File != null) ...{
+            'file': base64File,
+            'fileName': fileName,
+            'mimeType': mimeType,
+          },
+          if (replyToMessageId != null) 'replyTo': replyToMessageId,
+          if (reaction != null) 'reaction': reaction,
+        });
 
         return true;
       } else {
@@ -231,19 +256,21 @@ class MessageController extends GetxController {
   }
 
   void markMessagesAsSeen(String otherUserId) {
+    String? lastSeenMessageId;
+
     for (var msg in chatMessages) {
       if (msg['receiverId'] == currentUserId &&
           msg['senderId'] == otherUserId) {
         msg['status'] = 'seen';
+        lastSeenMessageId ??= msg['id'] ?? msg['_id'];
       }
     }
+
     chatMessages.refresh();
 
-    // Emit seen event
-    socketService.markMessageAsSeen(
-      otherUserId,
-      'some-message-id',
-    ); // Pass proper messageId if available
+    if (lastSeenMessageId != null) {
+      socketService.markMessageAsSeen(otherUserId, lastSeenMessageId);
+    }
   }
 
   void _updateMessageStatus(String messageId, String status) {
@@ -254,5 +281,12 @@ class MessageController extends GetxController {
       chatMessages[index]['status'] = status;
       chatMessages.refresh();
     }
+  }
+
+  void clearCurrentChat() {
+    currentChatUserId = null;
+    chatMessages.clear();
+    _messageIds.clear();
+    chatMessages.refresh();
   }
 }

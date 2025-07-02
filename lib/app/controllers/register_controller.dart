@@ -75,7 +75,7 @@ class RegisterController extends GetxController {
   Future<void> registerUser() async {
     if (!validateAll()) return;
 
-    final url = Uri.parse("http://192.168.56.1:5001/api/auth/signup");
+    final url = Uri.parse("http://192.168.1.70:5001/api/auth/signup");
 
     try {
       isLoading.value = true;
