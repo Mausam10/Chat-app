@@ -24,9 +24,15 @@ class HomeController extends GetxController {
   }
 
   void initSocket() {
-    final userId = currentUserId;
-    if (userId != null && userId.isNotEmpty) {
-      socketService = Get.put(SocketService(userId: userId));
+    final userId = storage.read('user_id') ?? '';
+    final authToken = storage.read('auth_token') ?? '';
+    const baseUrl = 'http://192.168.56.1:5001';
+
+    if (userId.isNotEmpty && authToken.isNotEmpty) {
+      final socketService = SocketService(baseUrl: baseUrl);
+      socketService.initSocket(userId: userId, token: authToken);
+      Get.put(socketService);
+
       socketService.connect();
 
       socketService.socket.on("getOnlineUsers", (data) {
@@ -36,7 +42,7 @@ class HomeController extends GetxController {
         }
       });
     } else {
-      print("⚠️ Cannot initialize socket: userId not found.");
+      print("⚠️ Cannot initialize socket: Missing userId or authToken.");
     }
   }
 

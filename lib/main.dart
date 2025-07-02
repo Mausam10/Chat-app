@@ -1,10 +1,12 @@
 import 'package:chat_app/app/controllers/message_controller.dart';
+
 import 'package:chat_app/app/controllers/theme_controller.dart';
 import 'package:chat_app/app/screens/auth/login_screen.dart';
 import 'package:chat_app/app/screens/auth/register_screen.dart';
 import 'package:chat_app/app/screens/chat/chat_screen.dart';
 import 'package:chat_app/app/screens/home/home_screen.dart';
 import 'package:chat_app/app/screens/onboarding/onboarding_screen.dart';
+
 import 'package:chat_app/app/screens/splash/splash_screen.dart';
 import 'package:chat_app/app/services/socket_service.dart';
 import 'package:chat_app/app/themes/app_theme.dart';
@@ -17,8 +19,19 @@ Future<void> main() async {
   await dotenv.load(fileName: "assets/.env");
   WidgetsFlutterBinding.ensureInitialized();
   await GetStorage.init();
+  //Register SocketService before any Get.find<SocketService>() is used
+  final storage = GetStorage();
+  final baseUrl = 'http://192.168.56.1:5001';
+  final authToken = storage.read('auth_token') ?? '';
+  final userId = storage.read('user_id') ?? '';
+
+  final socketService = SocketService(baseUrl: baseUrl);
+  socketService.initSocket(userId: userId, token: authToken);
+
+  Get.put(socketService);
   Get.put(ThemeController());
   Get.put(MessageController());
+
   runApp(MyApp());
 }
 

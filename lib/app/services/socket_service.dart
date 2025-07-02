@@ -2,88 +2,92 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class SocketService {
   late IO.Socket socket;
-  final String userId;
+  final String baseUrl;
 
-  SocketService({required this.userId});
-
-  void connect() {
-    print("Connecting to socket with userId: $userId");
-
-    socket = IO.io(
-      'http://localhost:5001', // Change this to your backend URL
-      IO.OptionBuilder()
-          .setTransports(['websocket', 'polling'])
-          .enableAutoConnect()
-          .setQuery({'userId': userId})
-          .setTimeout(5000)
-          .build(),
-    );
-
-    socket.connect();
-
-    socket.onConnect((_) {
-      print('Socket connected as $userId');
-    });
-
-    socket.onConnectError((error) {
-      print('Connect error: $error');
-    });
-
-    socket.onError((error) {
-      print('Socket error: $error');
-    });
-
-    socket.onDisconnect((_) {
-      print('Socket disconnected');
-    });
-
-    // Handle online users list update from server
-    socket.on('getOnlineUsers', (data) {
-      print('Online users: $data');
-      _onOnlineUsersUpdated?.call(List<String>.from(data));
-    });
-
-    // User joined/left room events
-    socket.on('user-joined', (data) => print('User joined room: $data'));
-    socket.on('user-left', (data) => print('User left room: $data'));
-
-    // WebRTC signaling events
-    socket.on('offer', (data) => print('Offer received: $data'));
-    socket.on('answer', (data) => print('Answer received: $data'));
-    socket.on(
-      'ice-candidate',
-      (data) => print('ICE candidate received: $data'),
-    );
-
-    // Messaging events
-    socket.on('receiveMessage', (data) {
-      print('Message received: $data');
-      _onMessageReceived?.call(data);
-    });
-
-    socket.on('messageSeen', (data) {
-      print('Message seen: $data');
-      _onMessageSeen?.call(data);
-    });
-
-    socket.on('userTyping', (data) {
-      print('User typing: $data');
-      _onUserTyping?.call(data);
-    });
-  }
-
-  void disconnect() {
-    socket.disconnect();
-    print("Socket disconnected manually.");
-  }
-
-  // Callbacks for external listeners
+  // Callbacks
   Function(List<String>)? _onOnlineUsersUpdated;
   Function(dynamic)? _onMessageReceived;
   Function(dynamic)? _onMessageSeen;
   Function(dynamic)? _onUserTyping;
 
-  // Register callback for online users update
+  final List<Map<String, dynamic>> _pendingMessages = [];
+
+  SocketService({required this.baseUrl});
+
+  void initSocket({required String userId, required String token}) {
+    socket = IO.io(
+      baseUrl,
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .setAuth({'token': token, 'userId': userId})
+          .disableAutoConnect()
+          .build(),
+    );
+
+    socket.onConnect((_) {
+      print('✅ Socket connected as $userId');
+
+      // Flush pending messages
+      if (_pendingMessages.isNotEmpty) {
+        print('📤 Flushing ${_pendingMessages.length} pending messages...');
+        for (var msg in _pendingMessages) {
+          socket.emit('sendMessage', msg);
+        }
+        _pendingMessages.clear();
+      }
+    });
+
+    socket.onConnectError((err) => print('❌ Connect error: $err'));
+    socket.onError((err) => print('❌ Socket error: $err'));
+    socket.onDisconnect((_) => print('⚠️ Socket disconnected'));
+
+    socket.on('getOnlineUsers', (data) {
+      print('👥 Online users: $data');
+      _onOnlineUsersUpdated?.call(List<String>.from(data));
+    });
+
+    socket.on('receiveMessage', (data) {
+      print('📩 Message received: $data');
+      _onMessageReceived?.call(data);
+    });
+
+    socket.on('messageSeen', (data) {
+      print('👁️ Message seen: $data');
+      _onMessageSeen?.call(data);
+    });
+
+    socket.on('userTyping', (data) {
+      print('⌨️ User typing: $data');
+      _onUserTyping?.call(data);
+    });
+
+    socket.on('user-joined', (data) => print('🔵 User joined room: $data'));
+    socket.on('user-left', (data) => print('🔴 User left room: $data'));
+
+    socket.on('offer', (data) => print('📨 Offer received: $data'));
+    socket.on('answer', (data) => print('📨 Answer received: $data'));
+    socket.on(
+      'ice-candidate',
+      (data) => print('📨 ICE candidate received: $data'),
+    );
+
+    socket.connect();
+  }
+
+  void connect() {
+    if (!socket.connected) {
+      print('🔌 Connecting socket...');
+      socket.connect();
+    }
+  }
+
+  void disconnect() {
+    if (socket.connected) {
+      socket.disconnect();
+      print('🔌 Socket disconnected manually.');
+    }
+  }
+
   void onOnlineUsersUpdated(Function(List<String>) callback) {
     _onOnlineUsersUpdated = callback;
   }
@@ -100,35 +104,70 @@ class SocketService {
     _onUserTyping = callback;
   }
 
-  // Emit events for chat features
-
   void sendMessage(String toUserId, String message) {
-    socket.emit('sendMessage', {'to': toUserId, 'message': message});
+    final msgData = {'to': toUserId, 'message': message};
+    if (socket.connected) {
+      socket.emit('sendMessage', msgData);
+      print('📡 Socket message emitted: $msgData');
+    } else {
+      print('⚠️ Socket not connected. Queuing message...');
+      _pendingMessages.add(msgData);
+      socket.connect();
+    }
   }
 
   void markMessageAsSeen(String toUserId, String messageId) {
-    socket.emit('messageSeen', {'to': toUserId, 'messageId': messageId});
+    final data = {'to': toUserId, 'messageId': messageId};
+    if (socket.connected) {
+      socket.emit('messageSeen', data);
+    } else {
+      print('⚠️ Socket not connected. Message seen event not emitted.');
+    }
   }
 
   void sendTypingEvent(String toUserId) {
-    socket.emit('typing', {'to': toUserId});
+    final data = {'to': toUserId};
+    if (socket.connected) {
+      socket.emit('typing', data);
+    } else {
+      print('⚠️ Socket not connected. Typing event not sent.');
+    }
   }
 
-  // Room & WebRTC signaling emits
-
-  void joinRoom(String roomId) {
-    socket.emit('join-room', {'roomId': roomId, 'userId': userId});
+  void joinRoom(String roomId, String userId) {
+    final data = {'roomId': roomId, 'userId': userId};
+    if (socket.connected) {
+      socket.emit('join-room', data);
+      print('✅ Joined room $roomId as user $userId');
+    } else {
+      print('⚠️ Socket not connected. Join room failed.');
+    }
   }
 
   void sendOffer(String toUserId, Map<String, dynamic> offer) {
-    socket.emit('offer', {'offer': offer, 'to': toUserId});
+    final data = {'offer': offer, 'to': toUserId};
+    if (socket.connected) {
+      socket.emit('offer', data);
+    } else {
+      print('⚠️ Socket not connected. Offer not sent.');
+    }
   }
 
   void sendAnswer(String toUserId, Map<String, dynamic> answer) {
-    socket.emit('answer', {'answer': answer, 'to': toUserId});
+    final data = {'answer': answer, 'to': toUserId};
+    if (socket.connected) {
+      socket.emit('answer', data);
+    } else {
+      print('⚠️ Socket not connected. Answer not sent.');
+    }
   }
 
   void sendIceCandidate(String toUserId, Map<String, dynamic> candidate) {
-    socket.emit('ice-candidate', {'candidate': candidate, 'to': toUserId});
+    final data = {'candidate': candidate, 'to': toUserId};
+    if (socket.connected) {
+      socket.emit('ice-candidate', data);
+    } else {
+      print('⚠️ Socket not connected. ICE candidate not sent.');
+    }
   }
 }

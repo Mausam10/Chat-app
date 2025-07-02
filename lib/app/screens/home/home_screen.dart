@@ -1,8 +1,6 @@
 import 'package:chat_app/app/controllers/home_controller.dart';
 import 'package:chat_app/app/controllers/message_controller.dart';
 import 'package:chat_app/app/controllers/theme_controller.dart';
-import 'package:chat_app/app/models/user_model.dart';
-import 'package:chat_app/app/screens/home/widgets/user_search_delegate.dart';
 import 'package:chat_app/app/themes/theme_selector_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -14,15 +12,10 @@ class HomeScreen extends StatelessWidget {
   final MessageController messageController = Get.put(MessageController());
 
   final storage = GetStorage();
-
-  // Reactive login state
   final RxBool isLoggedIn = false.obs;
-
-  // Reactive selected tab index
   final RxInt _selectedIndex = 0.obs;
 
   HomeScreen({Key? key}) : super(key: key) {
-    // Initialize login state from storage
     isLoggedIn.value = storage.hasData('user_id');
   }
 
@@ -30,19 +23,13 @@ class HomeScreen extends StatelessWidget {
     _selectedIndex.value = index;
   }
 
-  // Call this method after successful login somewhere in your login flow
-  void onUserLoggedIn() {
-    isLoggedIn.value = true;
-  }
-
-  // Centralized logout logic
   void onUserLoggedOut() {
     isLoggedIn.value = false;
     storage.erase();
     Get.offAllNamed('/LoginScreen');
   }
 
-  Widget _buildUsersTab(BuildContext context) {
+  Widget _buildMessagesTab(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isAdmin = storage.read('user_isAdmin') == true;
@@ -52,160 +39,194 @@ class HomeScreen extends StatelessWidget {
         return const Center(child: CircularProgressIndicator());
       }
 
-      if (homeController.users.isEmpty) {
-        return const Center(child: Text("No users found"));
-      }
+      final users =
+          homeController.users
+              .where((u) => isAdmin || u.id != storage.read('user_id'))
+              .toList();
 
-      return RefreshIndicator(
-        onRefresh: homeController.fetchUsers,
-        child: ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: homeController.users.length,
-          itemBuilder: (context, index) {
-            final UserModel user = homeController.users[index];
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              "Chats",
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              decoration: InputDecoration(
+                hintText: "Search Messenger",
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(32),
+                ),
+                filled: true,
+                fillColor: Theme.of(context).cardColor,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
 
-            if (!isAdmin && user.id == storage.read('user_id')) {
-              return const SizedBox.shrink();
-            }
-
-            return Card(
-              elevation: 2,
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(12),
-                leading: Stack(
-                  children: [
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundColor: colorScheme.primary.withAlpha(40),
-                      backgroundImage:
-                          user.profilePic != null
-                              ? NetworkImage(user.profilePic!)
-                              : null,
-                      child:
-                          user.profilePic == null
-                              ? Text(
-                                user.fullName.isNotEmpty
-                                    ? user.fullName[0].toUpperCase()
-                                    : '',
-                                style: TextStyle(color: colorScheme.primary),
-                              )
-                              : null,
-                    ),
-                    if (homeController.onlineUserIds.contains(user.id))
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+          // 🔵 Online avatars
+          SizedBox(
+            height: 90,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: users.length,
+              itemBuilder: (context, index) {
+                final user = users[index];
+                final isOnline = homeController.onlineUserIds.contains(user.id);
+                return Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: Column(
+                    children: [
+                      Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 28,
+                            backgroundColor: colorScheme.primary.withAlpha(40),
+                            backgroundImage:
+                                user.profilePic != null
+                                    ? NetworkImage(user.profilePic!)
+                                    : null,
+                            child:
+                                user.profilePic == null
+                                    ? Text(
+                                      user.fullName.isNotEmpty
+                                          ? user.fullName[0].toUpperCase()
+                                          : '',
+                                      style: TextStyle(
+                                        color: colorScheme.primary,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    )
+                                    : null,
                           ),
+                          if (isOnline)
+                            Positioned(
+                              bottom: 2,
+                              right: 2,
+                              child: Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(
+                                  color: Colors.green,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      SizedBox(
+                        width: 60,
+                        child: Text(
+                          user.fullName.split(" ").first,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12),
                         ),
                       ),
-                  ],
-                ),
-                title: Text(user.fullName, style: theme.textTheme.bodyLarge),
-                subtitle: Text(user.email, style: theme.textTheme.bodySmall),
-                onTap: () {
-                  Get.toNamed(
-                    '/ChatScreen',
-                    arguments: {'userId': user.id, 'userName': user.fullName},
-                  );
-                },
-              ),
-            );
-          },
-        ),
-      );
-    });
-  }
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
 
-  Widget _buildMessagesTab(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+          const SizedBox(height: 8),
 
-    return Obx(() {
-      if (homeController.isLoading.value) {
-        return const Center(child: CircularProgressIndicator());
-      }
+          // 📨 Chat List
+          Expanded(
+            child: ListView.builder(
+              itemCount: users.length,
+              itemBuilder: (context, index) {
+                final user = users[index];
+                final isOnline = homeController.onlineUserIds.contains(user.id);
 
-      final isAdmin = storage.read('user_isAdmin') == true;
-
-      if (homeController.users.isEmpty) {
-        return const Center(child: Text("No users available"));
-      }
-
-      return RefreshIndicator(
-        onRefresh: homeController.fetchUsers,
-        child: ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: homeController.users.length,
-          itemBuilder: (context, index) {
-            final user = homeController.users[index];
-
-            if (!isAdmin && user.id == storage.read('user_id')) {
-              return const SizedBox.shrink();
-            }
-
-            final isOnline = homeController.onlineUserIds.contains(user.id);
-
-            return Card(
-              elevation: 2,
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(12),
-                leading: Stack(
-                  children: [
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundColor: colorScheme.primary.withAlpha(40),
-                      backgroundImage:
-                          user.profilePic != null
-                              ? NetworkImage(user.profilePic!)
-                              : null,
-                      child:
-                          user.profilePic == null
-                              ? Text(
-                                user.fullName.isNotEmpty
-                                    ? user.fullName[0].toUpperCase()
-                                    : '',
-                                style: TextStyle(color: colorScheme.primary),
-                              )
-                              : null,
-                    ),
-                    if (isOnline)
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+                return ListTile(
+                  leading: Stack(
+                    children: [
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundImage:
+                            user.profilePic != null
+                                ? NetworkImage(user.profilePic!)
+                                : null,
+                        child:
+                            user.profilePic == null
+                                ? Text(
+                                  user.fullName.isNotEmpty
+                                      ? user.fullName[0].toUpperCase()
+                                      : '',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                )
+                                : null,
+                      ),
+                      if (isOnline)
+                        Positioned(
+                          bottom: 2,
+                          right: 2,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
                           ),
                         ),
+                    ],
+                  ),
+                  title: Text(
+                    user.fullName,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    "Tap to chat...",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        "1h",
+                        style: TextStyle(fontSize: 12),
+                      ), // Static for now
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.blue,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                  ],
-                ),
-                title: Text(user.fullName, style: theme.textTheme.bodyLarge),
-                subtitle: Text("Tap to chat", style: theme.textTheme.bodySmall),
-                trailing: Icon(Icons.chat, color: colorScheme.primary),
-                onTap: () {
-                  Get.toNamed(
-                    '/ChatScreen',
-                    arguments: {'userId': user.id, 'userName': user.fullName},
-                  );
-                },
-              ),
-            );
-          },
-        ),
+                    ],
+                  ),
+                  onTap: () {
+                    Get.toNamed(
+                      '/ChatScreen',
+                      arguments: {'userId': user.id, 'userName': user.fullName},
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       );
     });
   }
@@ -237,7 +258,7 @@ class HomeScreen extends StatelessWidget {
             Text(email, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => Get.toNamed('/EditProfileScreen'),
+              onPressed: () => Get.toNamed('/ProfileScreen'),
               icon: const Icon(Icons.edit),
               label: const Text("Edit Profile"),
             ),
@@ -285,15 +306,10 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
     final fullName = storage.read('user_fullName') ?? "User";
 
-    final tabs = [
-      _buildUsersTab(context),
-      _buildMessagesTab(context),
-      _buildSettingsTab(context),
-    ];
+    final tabs = [_buildMessagesTab(context), _buildSettingsTab(context)];
 
     return Obx(
       () => Scaffold(
@@ -318,8 +334,8 @@ class HomeScreen extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    "Hello, $fullName 👋",
-                    style: theme.textTheme.titleLarge,
+                    "Let's Chat",
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ],
               );
@@ -327,36 +343,6 @@ class HomeScreen extends StatelessWidget {
               return const SizedBox.shrink();
             }
           }),
-          actions: [
-            if (_selectedIndex.value == 0)
-              IconButton(
-                icon: Icon(Icons.search, color: colorScheme.primary),
-                tooltip: 'Search Users',
-                onPressed: () {
-                  showSearch(
-                    context: context,
-                    delegate: UserSearchDelegate(homeController.users),
-                  );
-                },
-              ),
-            IconButton(
-              icon: const Icon(Icons.brightness_6),
-              color: colorScheme.primary,
-              tooltip: 'Change Theme',
-              onPressed: () {
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(24),
-                    ),
-                  ),
-                  builder: (_) => showThemeSelectorSheet(),
-                );
-              },
-            ),
-          ],
         ),
         body: AnimatedSwitcher(
           duration: const Duration(milliseconds: 300),
@@ -385,7 +371,6 @@ class HomeScreen extends StatelessWidget {
             selectedItemColor: colorScheme.primary,
             unselectedItemColor: colorScheme.onSurface.withOpacity(0.6),
             items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Users'),
               BottomNavigationBarItem(
                 icon: Icon(Icons.message),
                 label: 'Messages',
