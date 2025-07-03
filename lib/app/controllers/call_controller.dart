@@ -1,132 +1,145 @@
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:get/get.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 
-class CallController extends GetxController {
-  IO.Socket? socket;
-  rtc.RTCPeerConnection? peerConnection;
-  rtc.MediaStream? localStream;
-  rtc.MediaStream? remoteStream;
+import 'package:get/get.dart' as gx;
 
-  final localRenderer = rtc.RTCVideoRenderer();
-  final remoteRenderer = rtc.RTCVideoRenderer();
-
-  final isCalling = false.obs;
-  final callAccepted = false.obs;
+class CallController extends gx.GetxController {
+  late IO.Socket socket;
+  late RTCPeerConnection peerConnection;
+  final localRenderer = RTCVideoRenderer();
+  final remoteRenderer = RTCVideoRenderer();
+  final isInCall = false.obs;
 
   @override
   void onInit() {
     super.onInit();
-    initRenderers();
-    connectSocket();
+    _initRenderers();
+    _connectSocket();
   }
 
-  Future<void> initRenderers() async {
+  Future<void> _initRenderers() async {
     await localRenderer.initialize();
     await remoteRenderer.initialize();
   }
 
-  void connectSocket() {
-    socket = IO.io('http://localhost:5001', <String, dynamic>{
+  void _connectSocket() {
+    socket = IO.io('http://192.168.1.70:5001', <String, dynamic>{
       'transports': ['websocket'],
     });
 
-    socket!.on('connect', (_) {
-      print('Connected to signaling server');
+    socket.on('connect', (_) {
+      print('Connected to socket');
     });
 
-    socket!.on('incoming-call', (data) async {
-      print('Incoming call from: ${data['from']}');
-      await _createPeerConnection(isCaller: false);
-
-      // Signal from caller (offer SDP)
-      var signal = data['signal'];
-      peerConnection!.setRemoteDescription(
-        rtc.RTCSessionDescription(signal['sdp'], signal['type']),
-      );
-
-      callAccepted.value = true;
-
-      // Create answer and send back
-      rtc.RTCSessionDescription answer = await peerConnection!.createAnswer();
-      await peerConnection!.setLocalDescription(answer);
-
-      socket!.emit('answer-call', {
-        'signal': {'sdp': answer.sdp, 'type': answer.type},
-        'to': data['from'],
-      });
+    socket.on('offer', (data) async {
+      await _onOfferReceived(data);
     });
 
-    socket!.on('call-accepted', (signal) async {
-      print('Call accepted');
-      callAccepted.value = true;
-      await peerConnection!.setRemoteDescription(
-        rtc.RTCSessionDescription(signal['sdp'], signal['type']),
-      );
+    socket.on('answer', (data) async {
+      await _onAnswerReceived(data);
+    });
+
+    socket.on('ice-candidate', (data) async {
+      await _onIceCandidate(data);
     });
   }
 
-  Future<void> startCall(String userToCall) async {
-    await _createPeerConnection(isCaller: true);
-
-    rtc.RTCSessionDescription offer = await peerConnection!.createOffer();
-    await peerConnection!.setLocalDescription(offer);
-
-    socket!.emit('call-user', {
-      'userToCall': userToCall,
-      'signal': {'sdp': offer.sdp, 'type': offer.type},
-      'from': socket!.id,
-    });
-
-    isCalling.value = true;
-  }
-
-  Future<void> _createPeerConnection({required bool isCaller}) async {
-    final config = {
-      'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
-      ],
-    };
-
-    peerConnection = await rtc.createPeerConnection(config);
-
-    localStream = await rtc.navigator!.mediaDevices.getUserMedia({
+  Future<void> startCall(bool isVideoCall) async {
+    final mediaConstraints = {
       'audio': true,
-      'video': true,
+      'video': isVideoCall ? {'facingMode': 'user'} : false,
+    };
+
+    final stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+    localRenderer.srcObject = stream;
+
+    peerConnection = await createPeerConnection(_iceServers());
+
+    stream.getTracks().forEach((track) {
+      peerConnection.addTrack(track, stream);
     });
 
-    localRenderer.srcObject = localStream;
-
-    // Add local stream tracks to connection
-    localStream!.getTracks().forEach((track) {
-      peerConnection!.addTrack(track, localStream!);
-    });
-
-    peerConnection!.onIceCandidate = (candidate) {
-      if (candidate != null) {
-        socket!.emit('ice-candidate', {
-          'candidate': candidate.toMap(),
-          'to':
-              isCaller
-                  ? 'userToCallId'
-                  : 'callerId', // You will need to manage this properly
-        });
+    peerConnection.onTrack = (event) {
+      if (event.streams.isNotEmpty) {
+        remoteRenderer.srcObject = event.streams[0];
       }
     };
 
-    peerConnection!.onTrack = (event) {
+    peerConnection.onIceCandidate = (candidate) {
+      socket.emit('ice-candidate', {'candidate': candidate.toMap()});
+    };
+
+    final offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    socket.emit('offer', {'sdp': offer.sdp, 'type': offer.type});
+
+    isInCall.value = true;
+  }
+
+  Future<void> _onOfferReceived(dynamic data) async {
+    await _createPeer();
+
+    await peerConnection.setRemoteDescription(
+      RTCSessionDescription(data['sdp'], data['type']),
+    );
+
+    final answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    socket.emit('answer', {'sdp': answer.sdp, 'type': answer.type});
+
+    isInCall.value = true;
+  }
+
+  Future<void> _onAnswerReceived(dynamic data) async {
+    final desc = RTCSessionDescription(data['sdp'], data['type']);
+    await peerConnection.setRemoteDescription(desc);
+  }
+
+  Future<void> _onIceCandidate(dynamic data) async {
+    await peerConnection.addCandidate(
+      RTCIceCandidate(
+        data['candidate']['candidate'],
+        data['candidate']['sdpMid'],
+        data['candidate']['sdpMLineIndex'],
+      ),
+    );
+  }
+
+  Future<void> _createPeer() async {
+    peerConnection = await createPeerConnection(_iceServers());
+
+    peerConnection.onTrack = (event) {
       if (event.streams.isNotEmpty) {
-        remoteStream = event.streams[0];
-        remoteRenderer.srcObject = remoteStream;
+        remoteRenderer.srcObject = event.streams[0];
       }
+    };
+
+    peerConnection.onIceCandidate = (candidate) {
+      socket.emit('ice-candidate', {'candidate': candidate.toMap()});
     };
   }
 
-  void dispose() {
+  Map<String, dynamic> _iceServers() => {
+    'iceServers': [
+      {'urls': 'stun:stun.l.google.com:19302'},
+      // optionally: {'urls': 'turn:turn.server.com', 'username': 'user', 'credential': 'pass'}
+    ],
+  };
+
+  void endCall() {
+    isInCall.value = false;
+    peerConnection.close();
+    localRenderer.srcObject?.dispose();
+    remoteRenderer.srcObject?.dispose();
+  }
+
+  @override
+  void onClose() {
+    socket.dispose();
     localRenderer.dispose();
     remoteRenderer.dispose();
-    peerConnection?.close();
-    socket?.disconnect();
-    super.dispose();
+    super.onClose();
   }
 }

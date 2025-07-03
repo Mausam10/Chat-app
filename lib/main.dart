@@ -66,13 +66,13 @@ class MyApp extends StatelessWidget {
           );
         },
 
-        initialRoute: '/LoginScreen',
+        initialRoute: '/splashScreen',
         getPages: [
-          // GetPage(name: '/splashScreen', page: () => const SplashScreen()),
-          // GetPage(
-          //   name: '/onboardingScreen',
-          //   page: () => const OnboardingScreen(),
-          // ),
+          GetPage(name: '/splashScreen', page: () => const SplashScreen()),
+          GetPage(
+            name: '/onboardingScreen',
+            page: () => const OnboardingScreen(),
+          ),
           GetPage(name: '/LoginScreen', page: () => LoginScreen()),
           GetPage(name: '/RegisterScreen', page: () => RegisterScreen()),
           GetPage(name: '/HomeScreen', page: () => HomeScreen()),
