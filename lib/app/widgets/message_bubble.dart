@@ -1,394 +1,288 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart'; // For file links if needed
-import 'package:video_player/video_player.dart'; // For video preview (optional)
-import 'package:audioplayers/audioplayers.dart'; // For audio preview (optional)
 
-class MessageBubble extends StatefulWidget {
-  final Map<String, dynamic> msg;
+class MessageBubble extends StatelessWidget {
+  final Map<String, dynamic> message;
   final bool isMe;
-  final bool isGroupChat;
+  final Function(String)? onReaction;
+  final ThemeData? themeData;
 
   const MessageBubble({
-    super.key,
-    required this.msg,
+    Key? key,
+    required this.message,
     required this.isMe,
-    this.isGroupChat = false,
-  });
-
-  @override
-  State<MessageBubble> createState() => _MessageBubbleState();
-}
-
-class _MessageBubbleState extends State<MessageBubble> {
-  VideoPlayerController? _videoController;
-  AudioPlayer? _audioPlayer;
-  bool _isPlayingAudio = false;
-
-  @override
-  void initState() {
-    super.initState();
-
-    // Init video controller if message has video file
-    if (_isVideo(widget.msg)) {
-      _videoController = VideoPlayerController.network(widget.msg['file'] ?? '')
-        ..initialize().then((_) => setState(() {}));
-    }
-
-    // Init audio player if message has audio file
-    if (_isAudio(widget.msg)) {
-      _audioPlayer = AudioPlayer();
-      _audioPlayer!.onPlayerComplete.listen((_) {
-        setState(() {
-          _isPlayingAudio = false;
-        });
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _videoController?.dispose();
-    _audioPlayer?.dispose();
-    super.dispose();
-  }
-
-  bool _isVideo(Map<String, dynamic> msg) {
-    final mime = (msg['mimeType'] ?? '').toString();
-    return mime.startsWith('video/');
-  }
-
-  bool _isAudio(Map<String, dynamic> msg) {
-    final mime = (msg['mimeType'] ?? '').toString();
-    return mime.startsWith('audio/');
-  }
-
-  bool _isFile(Map<String, dynamic> msg) {
-    return msg['file'] != null && !_isVideo(msg) && !_isAudio(msg);
-  }
+    this.onReaction,
+    this.themeData,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isMe = widget.isMe;
-    final msg = widget.msg;
-    final isGroupChat = widget.isGroupChat;
+    final theme = themeData ?? Theme.of(context);
+    final text = message['text'] ?? '';
+    final timestamp = message['timestamp'] ?? message['createdAt'];
+    final status = message['status'] ?? 'sent';
+    final reaction = message['reaction'];
+    final base64Image = message['image'];
+    final fileName = message['fileName'];
+    final mimeType = message['mimeType'];
 
-    final timestamp = _formatTime(msg['timestamp']);
-    final textColor =
-        isMe
-            ? theme.colorScheme.onPrimary
-            : theme.colorScheme.onSecondaryContainer;
-
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color:
-              isMe
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.secondaryContainer,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            // Group chat sender info
-            if (isGroupChat && !isMe)
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 10,
-                    backgroundImage: NetworkImage(
-                      msg['senderProfilePic'] ?? '',
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    msg['senderName'] ?? 'User',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+      child: Row(
+        mainAxisAlignment:
+            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (!isMe) ...[
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: theme.primaryColor.withOpacity(0.1),
+              child: Text(
+                'U',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.primaryColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              decoration: BoxDecoration(
+                color: isMe ? theme.primaryColor : theme.cardColor,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isMe ? 16 : 4),
+                  bottomRight: Radius.circular(isMe ? 4 : 16),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.shadowColor.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),
-
-            // Reply preview
-            if (msg['replyTo'] != null)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                margin: const EdgeInsets.only(bottom: 6, top: 6),
-                decoration: BoxDecoration(
-                  color: isMe ? Colors.white24 : Colors.black12,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  msg['replyToPreview'] ??
-                      msg['replyTo']['text'] ??
-                      'Replying to message...',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontStyle: FontStyle.italic,
-                    color: isMe ? Colors.white70 : Colors.black87,
-                  ),
-                ),
-              ),
-
-            // Image message
-            if (msg['image'] != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    msg['image'],
-                    width: 200,
-                    errorBuilder:
-                        (context, error, stack) => const Text(
-                          'Image failed to load',
-                          style: TextStyle(color: Colors.redAccent),
-                        ),
-                  ),
-                ),
-              ),
-
-            // Video preview
-            if (_isVideo(msg) &&
-                _videoController != null &&
-                _videoController!.value.isInitialized)
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                width: 200,
-                height: 150,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    AspectRatio(
-                      aspectRatio: _videoController!.value.aspectRatio,
-                      child: VideoPlayer(_videoController!),
-                    ),
-                    IconButton(
-                      iconSize: 40,
-                      icon: Icon(
-                        _videoController!.value.isPlaying
-                            ? Icons.pause_circle
-                            : Icons.play_circle,
-                        color: Colors.white70,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Image content
+                  if (base64Image != null && base64Image.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(16),
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _videoController!.value.isPlaying
-                              ? _videoController!.pause()
-                              : _videoController!.play();
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-            // Audio preview with play/pause button
-            if (_isAudio(msg) && _audioPlayer != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        _isPlayingAudio
-                            ? Icons.pause_circle
-                            : Icons.play_circle,
+                      child: Image.memory(
+                        base64Decode(base64Image),
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: 200,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            height: 100,
+                            color: Colors.grey.shade300,
+                            child: const Center(
+                              child: Icon(
+                                Icons.broken_image,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                      iconSize: 32,
-                      color: isMe ? Colors.white : Colors.black54,
-                      onPressed: () async {
-                        if (_isPlayingAudio) {
-                          await _audioPlayer!.pause();
-                          setState(() => _isPlayingAudio = false);
-                        } else {
-                          final url = msg['file'] ?? '';
-                          if (url.isNotEmpty) {
-                            await _audioPlayer!.play(UrlSource(url));
-                            setState(() => _isPlayingAudio = true);
-                          }
-                        }
-                      },
                     ),
-                    Text(
-                      msg['fileName'] ?? 'Audio file',
-                      style: TextStyle(fontSize: 14, color: textColor),
-                    ),
-                  ],
-                ),
-              ),
 
-            // Other file preview (PDF, DOCX, etc.)
-            if (_isFile(msg))
-              InkWell(
-                onTap: () async {
-                  final url = msg['file'] ?? '';
-                  if (url.isNotEmpty && await canLaunch(url)) {
-                    await launch(url);
-                  }
-                },
-                child: Container(
-                  margin: const EdgeInsets.symmetric(vertical: 6),
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isMe ? Colors.white24 : Colors.black12,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.insert_drive_file,
-                        size: 24,
-                        color: Colors.orange,
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          msg['fileName'] ?? 'File',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: textColor,
-                            decoration: TextDecoration.underline,
+                  // File content
+                  if (fileName != null && fileName.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _getFileIcon(mimeType),
+                            color:
+                                isMe ? Colors.white70 : theme.iconTheme.color,
                           ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // Text message (if present and not empty)
-            if (msg['text'] != null && msg['text'].toString().trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  msg['text'],
-                  style: TextStyle(color: textColor, fontSize: 15),
-                ),
-              ),
-
-            // Reaction emoji
-            if (msg['reaction'] != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  msg['reaction'],
-                  style: const TextStyle(fontSize: 18),
-                ),
-              ),
-
-            const SizedBox(height: 6),
-
-            // Timestamp and status (including group "Seen by X")
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatTime(msg['timestamp']),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: isMe ? Colors.white70 : Colors.black54,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                if (isMe)
-                  Tooltip(
-                    message: _getStatusTooltip(),
-                    child: _buildMessageStatusIcon(),
-                  ),
-
-                // For group chats: show "Seen by X" summary if message seen by others
-                if (isGroupChat && isMe)
-                  Flexible(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: Text(
-                        _seenBySummary(),
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontStyle: FontStyle.italic,
-                          color: Colors.lightGreenAccent,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              fileName,
+                              style: TextStyle(
+                                color:
+                                    isMe
+                                        ? Colors.white
+                                        : theme.textTheme.bodyMedium?.color,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+
+                  // Text content
+                  if (text.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                        text,
+                        style: TextStyle(
+                          color:
+                              isMe
+                                  ? Colors.white
+                                  : theme.textTheme.bodyMedium?.color,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+
+                  // Timestamp and status
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      left: 12,
+                      right: 12,
+                      bottom: 8,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatTimestamp(timestamp),
+                          style: TextStyle(
+                            color:
+                                isMe
+                                    ? Colors.white70
+                                    : theme.textTheme.bodySmall?.color,
+                            fontSize: 12,
+                          ),
+                        ),
+                        if (isMe) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            _getStatusIcon(status),
+                            size: 16,
+                            color: Colors.white70,
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-              ],
+
+                  // Reaction
+                  if (reaction != null)
+                    Positioned(
+                      bottom: -8,
+                      right: isMe ? 8 : null,
+                      left: isMe ? null : 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.scaffoldBackgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme.dividerColor,
+                            width: 1,
+                          ),
+                        ),
+                        child: Text(
+                          reaction,
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          if (isMe) ...[
+            const SizedBox(width: 8),
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: theme.primaryColor,
+              child: const Text(
+                'M',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  String _seenBySummary() {
-    final seenBy = widget.msg['seenBy'] as List<dynamic>? ?? [];
-    final currentUserId = widget.msg['senderId'];
+  IconData _getFileIcon(String? mimeType) {
+    if (mimeType == null) return Icons.insert_drive_file;
 
-    // Remove self from seenBy list
-    final othersSeenBy = seenBy.where((id) => id != currentUserId).toList();
-
-    if (othersSeenBy.isEmpty) {
-      return 'Seen by nobody yet';
+    if (mimeType.startsWith('image/')) return Icons.image;
+    if (mimeType.startsWith('video/')) return Icons.video_file;
+    if (mimeType.startsWith('audio/')) return Icons.audio_file;
+    if (mimeType.contains('pdf')) return Icons.picture_as_pdf;
+    if (mimeType.contains('document') || mimeType.contains('word')) {
+      return Icons.description;
+    }
+    if (mimeType.contains('spreadsheet') || mimeType.contains('excel')) {
+      return Icons.table_chart;
+    }
+    if (mimeType.contains('presentation') || mimeType.contains('powerpoint')) {
+      return Icons.slideshow;
     }
 
-    // For simplicity, just show count
-    return 'Seen by ${othersSeenBy.length} user${othersSeenBy.length > 1 ? 's' : ''}';
+    return Icons.insert_drive_file;
   }
 
-  Icon _buildMessageStatusIcon() {
-    final seenBy = widget.msg['seenBy'] as List<dynamic>? ?? [];
-    final deliveredTo = widget.msg['deliveredTo'] as List<dynamic>? ?? [];
-    final receiverId = widget.msg['receiverId'];
-
-    if (seenBy.contains(receiverId)) {
-      return const Icon(
-        Icons.done_all,
-        size: 16,
-        color: Colors.lightBlueAccent,
-      );
-    } else if (deliveredTo.contains(receiverId)) {
-      return const Icon(Icons.done_all, size: 16, color: Colors.grey);
-    } else {
-      return const Icon(Icons.check, size: 16, color: Colors.grey);
-    }
-  }
-
-  String _getStatusTooltip() {
-    final seenBy = widget.msg['seenBy'] as List<dynamic>? ?? [];
-    final deliveredTo = widget.msg['deliveredTo'] as List<dynamic>? ?? [];
-    final receiverId = widget.msg['receiverId'];
-
-    if (seenBy.contains(receiverId)) {
-      return 'Seen';
-    } else if (deliveredTo.contains(receiverId)) {
-      return 'Delivered';
-    } else {
-      return 'Sent';
+  IconData _getStatusIcon(String status) {
+    switch (status) {
+      case 'sending':
+        return Icons.access_time;
+      case 'sent':
+        return Icons.check;
+      case 'delivered':
+        return Icons.done_all;
+      case 'seen':
+        return Icons.done_all;
+      default:
+        return Icons.check;
     }
   }
 
-  String _formatTime(dynamic timestamp) {
-    if (timestamp == null) return '';
-    DateTime? dt;
+  String _formatTimestamp(dynamic timestamp) {
+    try {
+      DateTime dateTime;
 
-    if (timestamp is String) {
-      dt = DateTime.tryParse(timestamp);
-    } else if (timestamp is int) {
-      dt = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (timestamp is String) {
+        dateTime = DateTime.parse(timestamp);
+      } else if (timestamp is int) {
+        dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      } else {
+        return '';
+      }
+
+      final now = DateTime.now();
+      final difference = now.difference(dateTime);
+
+      if (difference.inDays > 0) {
+        return DateFormat('MMM dd, HH:mm').format(dateTime);
+      } else {
+        return DateFormat('HH:mm').format(dateTime);
+      }
+    } catch (e) {
+      return '';
     }
-
-    return dt != null ? DateFormat('hh:mm a').format(dt) : '';
   }
 }
