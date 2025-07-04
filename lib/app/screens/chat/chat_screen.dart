@@ -1,8 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
+
 import 'package:chat_app/app/controllers/call_controller.dart';
 import 'package:chat_app/app/controllers/message_controller.dart';
+import 'package:chat_app/app/controllers/theme_controller.dart';
 import 'package:chat_app/app/screens/call/call_screen.dart';
+import 'package:chat_app/app/themes/theme_selector_sheet.dart';
 import 'package:chat_app/app/widgets/emoji_input.dart';
 import 'package:chat_app/app/widgets/message_bubble.dart';
 import 'package:flutter/material.dart';
@@ -13,8 +15,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as path;
-import '../../controllers/theme_controller.dart';
-import '../../themes/theme_selector_sheet.dart';
 
 class ChatScreen extends StatefulWidget {
   final String receiverId;
@@ -289,6 +289,21 @@ class _ChatScreenState extends State<ChatScreen>
       );
     } catch (e) {
       debugPrint('Error showing snackbar: $e');
+    }
+  }
+
+  // --- Pull to Refresh ---
+  Future<void> _handleRefresh() async {
+    if (_isDisposed) return;
+
+    try {
+      await messageController.fetchMessages(receiverId);
+      await messageController.socketService.connect();
+    } catch (e) {
+      debugPrint('Error refreshing: $e');
+      if (!_isDisposed) {
+        _showSnackbar('Error', 'Failed to refresh');
+      }
     }
   }
 
@@ -870,316 +885,377 @@ class _ChatScreenState extends State<ChatScreen>
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Get.back(),
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              receiverName,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            Obx(() {
-              final isTyping = messageController.isUserTyping.value;
-              final isOnline = messageController.isUserOnline.value;
-              final isConnected = messageController.socketService.isConnected;
+    return Obx(() {
+      final currentTheme = themeController.currentTheme.value;
 
-              if (!isConnected) {
-                return const Text(
-                  'Connecting...',
-                  style: TextStyle(fontSize: 12, color: Colors.orange),
+      return Scaffold(
+        backgroundColor: currentTheme.scaffoldBackgroundColor,
+        appBar: AppBar(
+          backgroundColor: currentTheme.appBarTheme.backgroundColor,
+          foregroundColor: currentTheme.appBarTheme.foregroundColor,
+          leading: IconButton(
+            icon: Icon(
+              Icons.arrow_back,
+              color: currentTheme.appBarTheme.foregroundColor,
+            ),
+            onPressed: () => Get.back(),
+          ),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                receiverName,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: currentTheme.appBarTheme.foregroundColor,
+                ),
+              ),
+              Obx(() {
+                final isTyping = messageController.isUserTyping.value;
+                final isOnline = messageController.isUserOnline.value;
+                final isConnected = messageController.socketService.isConnected;
+
+                Color statusColor;
+                String statusText;
+
+                if (!isConnected) {
+                  statusColor = Colors.orange;
+                  statusText = 'Connecting...';
+                } else if (isTyping) {
+                  statusColor = Colors.green;
+                  statusText = 'Typing...';
+                } else if (isOnline) {
+                  statusColor = Colors.green;
+                  statusText = 'Online';
+                } else {
+                  statusColor = Colors.grey;
+                  statusText = 'Last seen recently';
+                }
+
+                return Text(
+                  statusText,
+                  style: TextStyle(fontSize: 12, color: statusColor),
                 );
-              } else if (isTyping) {
-                return const Text(
-                  'Typing...',
-                  style: TextStyle(fontSize: 12, color: Colors.green),
+              }),
+            ],
+          ),
+          actions: [
+            IconButton(
+              icon: Icon(
+                Icons.videocam,
+                color: currentTheme.appBarTheme.foregroundColor,
+              ),
+              onPressed: () => _initiateCall(true),
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.call,
+                color: currentTheme.appBarTheme.foregroundColor,
+              ),
+              onPressed: () => _initiateCall(false),
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.palette,
+                color: currentTheme.appBarTheme.foregroundColor,
+              ),
+              onPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
+                  ),
+                  builder: (_) => showThemeSelectorSheet(),
                 );
-              } else if (isOnline) {
-                return const Text(
-                  'Online',
-                  style: TextStyle(fontSize: 12, color: Colors.green),
-                );
-              } else {
-                return const Text(
-                  'Last seen recently',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                );
-              }
-            }),
+              },
+            ),
+            PopupMenuButton(
+              icon: Icon(
+                Icons.more_vert,
+                color: currentTheme.appBarTheme.foregroundColor,
+              ),
+              itemBuilder:
+                  (context) => [
+                    const PopupMenuItem(
+                      value: 'clear',
+                      child: Row(
+                        children: [
+                          Icon(Icons.clear_all, color: Colors.red),
+                          SizedBox(width: 8),
+                          Text('Clear Chat'),
+                        ],
+                      ),
+                    ),
+                  ],
+              onSelected: (value) {
+                if (value == 'clear') {
+                  _clearChat();
+                }
+              },
+            ),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.videocam),
-            onPressed: () => _initiateCall(true),
-          ),
-          IconButton(
-            icon: const Icon(Icons.call),
-            onPressed: () => _initiateCall(false),
-          ),
-          IconButton(
-            icon: const Icon(Icons.palette),
-            onPressed: () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                builder: (_) => showThemeSelectorSheet(),
-              );
-            },
-          ),
-          PopupMenuButton(
-            itemBuilder:
-                (context) => [
-                  const PopupMenuItem(
-                    value: 'clear',
-                    child: Row(
-                      children: [
-                        Icon(Icons.clear_all, color: Colors.red),
-                        SizedBox(width: 8),
-                        Text('Clear Chat'),
-                      ],
-                    ),
-                  ),
-                ],
-            onSelected: (value) {
-              if (value == 'clear') {
-                _clearChat();
-              }
-            },
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Connection Status Indicator
-          Obx(() {
-            final isConnected = messageController.socketService.isConnected;
-            if (!isConnected) {
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                color: Colors.orange,
-                child: const Text(
-                  'Connecting to chat server...',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white, fontSize: 12),
-                ),
-              );
-            }
-            return const SizedBox.shrink();
-          }),
-
-          // Reply Preview
-          if (replyingTo != null)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Container(width: 3, height: 40, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Replying to',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.blue,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          replyingTo!['text'] ?? 'Message',
-                          style: const TextStyle(fontSize: 14),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 20),
-                    onPressed: () {
-                      if (mounted) {
-                        setState(() => replyingTo = null);
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-
-          // Messages List
-          Expanded(
-            child: Obx(() {
-              if (messageController.isLoading.value &&
-                  messageController.chatMessages.isEmpty) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (messageController.chatMessages.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.chat_bubble_outline,
-                        size: 64,
-                        color: Colors.grey,
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'No messages yet',
-                        style: TextStyle(fontSize: 18, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Start a conversation with $receiverName',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
+        body: Column(
+          children: [
+            // Connection Status Indicator
+            Obx(() {
+              final isConnected = messageController.socketService.isConnected;
+              if (!isConnected) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.orange,
+                  child: const Text(
+                    'Connecting to chat server...',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 );
               }
+              return const SizedBox.shrink();
+            }),
 
-              return NotificationListener<ScrollNotification>(
-                onNotification: (scrollInfo) {
-                  if (scrollInfo is ScrollEndNotification) {
-                    final pixels = scrollInfo.metrics.pixels;
-                    final maxScroll = scrollInfo.metrics.maxScrollExtent;
-                    _autoScrollEnabled = pixels >= maxScroll - 100;
-                  }
-                  return true;
-                },
-                child: ListView.builder(
-                  controller: scrollController,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 8,
-                  ),
-                  itemCount: messageController.chatMessages.length,
-                  itemBuilder: (context, index) {
-                    final message = messageController.chatMessages[index];
-                    return GestureDetector(
-                      onLongPress: () => _showMessageActions(message),
-                      child: MessageBubble(
-                        message: message,
-                        isMe: message['senderId'] == storage.read('user_id'),
-                        onReaction:
-                            (emoji) => handleReaction(
-                              message['id'] ?? message['_id'],
-                              emoji,
+            // Reply Preview
+            if (replyingTo != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: currentTheme.cardColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 3,
+                      height: 40,
+                      color: currentTheme.primaryColor,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Replying to',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: currentTheme.primaryColor,
+                              fontWeight: FontWeight.w500,
                             ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            replyingTo!['text'] ?? 'Message',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: currentTheme.textTheme.bodyMedium?.color,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.close,
+                        size: 20,
+                        color: currentTheme.iconTheme.color,
+                      ),
+                      onPressed: () {
+                        if (mounted) {
+                          setState(() => replyingTo = null);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+            // Messages List with Pull to Refresh
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _handleRefresh,
+                child: Obx(() {
+                  if (messageController.isLoading.value &&
+                      messageController.chatMessages.isEmpty) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  if (messageController.chatMessages.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.chat_bubble_outline,
+                            size: 64,
+                            color: currentTheme.hintColor,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No messages yet',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: currentTheme.hintColor,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Start a conversation with $receiverName',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: currentTheme.hintColor,
+                            ),
+                          ),
+                        ],
                       ),
                     );
-                  },
-                ),
-              );
-            }),
-          ),
-
-          // Emoji Picker
-          if (showEmojiPicker)
-            SizedBox(
-              height: 250,
-              child: EmojiInput(
-                onEmojiSelected: (emoji) {
-                  if (!_isDisposed && mounted) {
-                    textController.text += emoji;
-                    textController.selection = TextSelection.fromPosition(
-                      TextPosition(offset: textController.text.length),
-                    );
                   }
-                },
+
+                  return NotificationListener<ScrollNotification>(
+                    onNotification: (scrollInfo) {
+                      if (scrollInfo is ScrollEndNotification) {
+                        final pixels = scrollInfo.metrics.pixels;
+                        final maxScroll = scrollInfo.metrics.maxScrollExtent;
+                        _autoScrollEnabled = pixels >= maxScroll - 100;
+                      }
+                      return true;
+                    },
+                    child: ListView.builder(
+                      controller: scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                      itemCount: messageController.chatMessages.length,
+                      itemBuilder: (context, index) {
+                        final message = messageController.chatMessages[index];
+                        return GestureDetector(
+                          onLongPress: () => _showMessageActions(message),
+                          child: MessageBubble(
+                            message: message,
+                            isMe:
+                                message['senderId'] == storage.read('user_id'),
+                            onReaction:
+                                (emoji) => handleReaction(
+                                  message['id'] ?? message['_id'],
+                                  emoji,
+                                ),
+                            themeData: currentTheme,
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                }),
               ),
             ),
 
-          // Input Area
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: Colors.grey.shade300)),
-            ),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.attach_file),
-                  onPressed: _showFilePickerOptions,
-                ),
-                IconButton(
-                  icon: Icon(
-                    showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions,
-                  ),
-                  onPressed: () {
-                    if (mounted) {
-                      setState(() {
-                        showEmojiPicker = !showEmojiPicker;
-                        if (showEmojiPicker) {
-                          focusNode.unfocus();
-                        } else {
-                          focusNode.requestFocus();
-                        }
-                      });
+            // Emoji Picker
+            if (showEmojiPicker)
+              SizedBox(
+                height: 250,
+                child: EmojiInput(
+                  onEmojiSelected: (emoji) {
+                    if (!_isDisposed && mounted) {
+                      textController.text += emoji;
+                      textController.selection = TextSelection.fromPosition(
+                        TextPosition(offset: textController.text.length),
+                      );
                     }
                   },
                 ),
-                Expanded(
-                  child: TextField(
-                    controller: textController,
-                    focusNode: focusNode,
-                    maxLines: null,
-                    textInputAction: TextInputAction.newline,
-                    decoration: InputDecoration(
-                      hintText: 'Type a message...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey.shade100,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
+              ),
+
+            // Input Area
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: currentTheme.scaffoldBackgroundColor,
+                border: Border(
+                  top: BorderSide(color: currentTheme.dividerColor),
+                ),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.attach_file,
+                      color: currentTheme.iconTheme.color,
                     ),
-                    onSubmitted: (_) => handleSend(),
+                    onPressed: _showFilePickerOptions,
                   ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.blue,
-                    shape: BoxShape.circle,
+                  IconButton(
+                    icon: Icon(
+                      showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions,
+                      color: currentTheme.iconTheme.color,
+                    ),
+                    onPressed: () {
+                      if (mounted) {
+                        setState(() {
+                          showEmojiPicker = !showEmojiPicker;
+                          if (showEmojiPicker) {
+                            focusNode.unfocus();
+                          } else {
+                            focusNode.requestFocus();
+                          }
+                        });
+                      }
+                    },
                   ),
-                  child: IconButton(
-                    icon: const Icon(Icons.send, color: Colors.white),
-                    onPressed: handleSend,
+                  Expanded(
+                    child: TextField(
+                      controller: textController,
+                      focusNode: focusNode,
+                      maxLines: null,
+                      textInputAction: TextInputAction.newline,
+                      style: TextStyle(
+                        color: currentTheme.textTheme.bodyLarge?.color,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Type a message...',
+                        hintStyle: TextStyle(color: currentTheme.hintColor),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: currentTheme.cardColor,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                      ),
+                      onSubmitted: (_) => handleSend(),
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: currentTheme.primaryColor,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.send,
+                        color: currentTheme.colorScheme.onPrimary,
+                      ),
+                      onPressed: handleSend,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    });
   }
 }

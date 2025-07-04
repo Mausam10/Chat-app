@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:chat_app/app/themes/app_theme.dart';
-import 'package:chat_app/app/controllers/theme_controller.dart';
+import '../themes/app_theme.dart';
+import '../controllers/theme_controller.dart';
 
 Widget showThemeSelectorSheet() {
   final themeController = Get.find<ThemeController>();
@@ -38,7 +38,8 @@ Widget showThemeSelectorSheet() {
                   return selectedMode == ThemeMode.light &&
                       themeController.currentCustomTheme.isEmpty;
                 }
-                return selectedMode == modes[index];
+                return selectedMode == modes[index] &&
+                    themeController.currentCustomTheme.isEmpty;
               }),
               onPressed: (index) {
                 final modes = [
@@ -49,6 +50,7 @@ Widget showThemeSelectorSheet() {
                 themeController.setThemeMode(modes[index]);
                 Get.back();
               },
+              borderRadius: BorderRadius.circular(12),
               children: const [
                 Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
@@ -63,7 +65,6 @@ Widget showThemeSelectorSheet() {
                   child: Text("Dark"),
                 ),
               ],
-              borderRadius: BorderRadius.circular(12),
             ),
 
             const SizedBox(height: 24),
@@ -86,40 +87,86 @@ Widget showThemeSelectorSheet() {
                             themeController.currentCustomTheme.value ==
                             themeName;
 
-                        // Estimate text color for contrast
+                        // Get colors from theme
                         final backgroundColor = theme.scaffoldBackgroundColor;
-                        final brightness = ThemeData.estimateBrightnessForColor(
-                          backgroundColor,
-                        );
+                        final primaryColor = theme.primaryColor;
                         final textColor =
-                            brightness == Brightness.dark
+                            theme.textTheme.bodyLarge?.color ??
+                            (theme.brightness == Brightness.dark
                                 ? Colors.white
-                                : Colors.black;
+                                : Colors.black);
 
                         return GestureDetector(
                           onTap: () {
                             themeController.setCustomTheme(themeName);
                             Get.back();
+
+                            // Show confirmation snackbar
+                            Get.snackbar(
+                              "Theme Applied",
+                              "$themeName theme is now active",
+                              snackPosition: SnackPosition.BOTTOM,
+                              duration: const Duration(seconds: 2),
+                              backgroundColor: theme.cardColor,
+                              colorText: textColor,
+                              margin: const EdgeInsets.all(16),
+                              borderRadius: 12,
+                              snackStyle: SnackStyle.FLOATING,
+                            );
                           },
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 300),
-                            padding: const EdgeInsets.all(8),
+                            padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               color: backgroundColor,
                               border: Border.all(
                                 color:
                                     isSelected
-                                        ? Colors.blue
+                                        ? primaryColor
                                         : Colors.transparent,
-                                width: 2,
+                                width: 3,
                               ),
                               borderRadius: BorderRadius.circular(12),
+                              boxShadow:
+                                  isSelected
+                                      ? [
+                                        BoxShadow(
+                                          color: primaryColor.withOpacity(0.3),
+                                          blurRadius: 8,
+                                          spreadRadius: 2,
+                                        ),
+                                      ]
+                                      : null,
                             ),
                             width: 120,
                             height: 120,
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
+                                // Theme preview colors
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Container(
+                                      width: 16,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        color: primaryColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Container(
+                                      width: 16,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        color: theme.colorScheme.secondary,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
                                 Text(
                                   themeName,
                                   style: TextStyle(
@@ -128,45 +175,26 @@ Widget showThemeSelectorSheet() {
                                     color: textColor,
                                   ),
                                   textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: 8),
-                                ElevatedButton(
-                                  onPressed: () {
-                                    themeController.setCustomTheme(themeName);
-                                    Get.back();
-
-                                    // Get the newly applied ThemeData after setting the theme
-                                    final newTheme =
-                                        AppThemes.allThemes[themeName]!;
-
-                                    Get.snackbar(
-                                      "Theme Applied",
-                                      "$themeName theme is now active",
-                                      snackPosition: SnackPosition.BOTTOM,
-                                      duration: const Duration(seconds: 2),
-                                      backgroundColor:
-                                          newTheme.colorScheme.surface,
-                                      colorText: newTheme.colorScheme.onSurface,
-                                      margin: const EdgeInsets.all(16),
-                                      borderRadius: 12,
-                                      snackStyle: SnackStyle.FLOATING,
-                                    );
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: theme.colorScheme.primary,
-                                    foregroundColor:
-                                        theme.colorScheme.onPrimary,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                    ),
-                                    minimumSize: const Size(60, 30),
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    visualDensity: VisualDensity.compact,
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
                                   ),
-                                  child: const Text(
+                                  decoration: BoxDecoration(
+                                    color: primaryColor,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
                                     "Apply",
-                                    style: TextStyle(fontSize: 10),
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: theme.colorScheme.onPrimary,
+                                    ),
                                   ),
                                 ),
                               ],
