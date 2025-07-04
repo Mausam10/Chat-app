@@ -10,7 +10,7 @@ String getBaseUrl() {
     // For mobile:
     // - Use 10.0.2.2 for Android Emulator
     // - Use your computer's IP (e.g., 192.168.x.x) for real device
-    return 'http://172.16.7.243:5001'; // 🔁 Replace this with your actual local IP
+    return 'http://172.16.3.39:5001'; // 🔁 Replace this with your actual local IP
   }
 }
 

@@ -30,7 +30,7 @@ Future<void> main() async {
 
     // Initialize services
     final storage = GetStorage();
-    final baseUrl = 'http://192.168.1.70:5001';
+    final baseUrl = 'http://172.16.3.39:5001';
     final authToken = storage.read('auth_token') ?? '';
     final userId = storage.read('user_id') ?? '';
 

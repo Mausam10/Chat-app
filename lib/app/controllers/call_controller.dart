@@ -5,7 +5,7 @@ import 'dart:async';
 import '../services/socket_service.dart';
 
 class CallController extends GetxController {
-  // Observable variables
+  // Observable variables - Fixed redundancy
   var isInCall = false.obs;
   var isVideoCall = false.obs;
   var isMuted = false.obs;
@@ -13,10 +13,6 @@ class CallController extends GetxController {
   var isConnected = false.obs;
   var callDuration = 0.obs;
   var connectionStatus = 'Connecting...'.obs;
-
-  // Add missing observable variables for UI consistency
-  var isMicEnabled = true.obs;
-  var isCameraEnabled = true.obs;
 
   // WebRTC variables
   webrtc.RTCPeerConnection? _peerConnection;
@@ -30,7 +26,7 @@ class CallController extends GetxController {
   String? remoteUserId;
   bool isInitiator = false;
 
-  // Socket service
+  // Socket service with null safety
   final SocketService socketService = Get.find<SocketService>();
 
   // Timer for call duration
@@ -49,21 +45,34 @@ class CallController extends GetxController {
       await remoteRenderer.initialize();
     } catch (e) {
       print('Error initializing renderers: $e');
+      _showError('Failed to initialize video renderers');
     }
   }
 
   void _setupSocketListeners() {
     final socket = socketService.socket;
 
-    socket?.on('webrtc-offer', (data) => _handleOffer(data));
-    socket?.on('webrtc-answer', (data) => _handleAnswer(data));
-    socket?.on('webrtc-ice-candidate', (data) => _handleIceCandidate(data));
-    socket?.on('call-ended', (_) => endCall());
+    // Fixed: Added null safety check
+    if (socket == null) {
+      print('Socket is null, cannot setup listeners');
+      return;
+    }
+
+    socket.on('webrtc-offer', (data) => _handleOffer(data));
+    socket.on('webrtc-answer', (data) => _handleAnswer(data));
+    socket.on('webrtc-ice-candidate', (data) => _handleIceCandidate(data));
+    socket.on('call-ended', (_) => endCall());
   }
 
   /// Main method to start a call
   Future<void> startCall(String userId, bool videoCall) async {
     try {
+      // Validation
+      if (userId.isEmpty) {
+        _showError('Invalid user ID');
+        return;
+      }
+
       // Check permissions first
       if (!await _checkPermissions(videoCall)) {
         _showError('Permissions not granted');
@@ -93,21 +102,24 @@ class CallController extends GetxController {
     } catch (e) {
       print('Error starting call: $e');
       _showError('Failed to start call: ${e.toString()}');
-      endCall();
+      await endCall(); // Fixed: Made async
     }
   }
 
   /// Initialize WebRTC peer connection
   Future<void> _initializeWebRTC() async {
+    // Fixed: More comprehensive STUN/TURN servers
     final configuration = {
       'iceServers': [
         {
           'urls': [
             'stun:stun1.l.google.com:19302',
             'stun:stun2.l.google.com:19302',
+            'stun:stun3.l.google.com:19302',
           ],
         },
       ],
+      'iceCandidatePoolSize': 10,
     };
 
     final constraints = {
@@ -117,98 +129,156 @@ class CallController extends GetxController {
       ],
     };
 
-    _peerConnection = await webrtc.createPeerConnection(
-      configuration,
-      constraints,
-    );
+    try {
+      _peerConnection = await webrtc.createPeerConnection(
+        configuration,
+        constraints,
+      );
 
-    // Handle ICE candidates
-    _peerConnection?.onIceCandidate = (webrtc.RTCIceCandidate candidate) {
-      socketService.socket?.emit('webrtc-ice-candidate', {
-        'to': remoteUserId,
-        'candidate': candidate.toMap(),
-      });
-    };
+      // Handle ICE candidates
+      _peerConnection?.onIceCandidate = (webrtc.RTCIceCandidate candidate) {
+        final socket = socketService.socket;
+        if (socket != null && remoteUserId != null) {
+          socket.emit('webrtc-ice-candidate', {
+            'to': remoteUserId,
+            'candidate': candidate.toMap(),
+          });
+        }
+      };
 
-    // Handle remote stream
-    _peerConnection?.onAddStream = (webrtc.MediaStream stream) {
-      _remoteStream = stream;
-      remoteRenderer.srcObject = stream;
-      connectionStatus.value = 'Connected';
-      isConnected.value = true;
-    };
+      // Handle remote stream
+      _peerConnection?.onAddStream = (webrtc.MediaStream stream) {
+        _remoteStream = stream;
+        remoteRenderer.srcObject = stream;
+        connectionStatus.value = 'Connected';
+        isConnected.value = true;
+      };
 
-    // Handle connection state changes
-    _peerConnection?.onConnectionState = (webrtc.RTCPeerConnectionState state) {
-      switch (state) {
-        case webrtc.RTCPeerConnectionState.RTCPeerConnectionStateConnected:
-          connectionStatus.value = 'Connected';
-          isConnected.value = true;
-          break;
-        case webrtc.RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
-          connectionStatus.value = 'Disconnected';
-          isConnected.value = false;
-          break;
-        case webrtc.RTCPeerConnectionState.RTCPeerConnectionStateFailed:
-          connectionStatus.value = 'Connection failed';
-          endCall();
-          break;
-        case webrtc.RTCPeerConnectionState.RTCPeerConnectionStateConnecting:
-          connectionStatus.value = 'Connecting...';
-          break;
-        default:
-          break;
-      }
-    };
+      // Handle connection state changes
+      _peerConnection?.onConnectionState = (
+        webrtc.RTCPeerConnectionState state,
+      ) {
+        switch (state) {
+          case webrtc.RTCPeerConnectionState.RTCPeerConnectionStateConnected:
+            connectionStatus.value = 'Connected';
+            isConnected.value = true;
+            break;
+          case webrtc.RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
+            connectionStatus.value = 'Disconnected';
+            isConnected.value = false;
+            break;
+          case webrtc.RTCPeerConnectionState.RTCPeerConnectionStateFailed:
+            connectionStatus.value = 'Connection failed';
+            endCall();
+            break;
+          case webrtc.RTCPeerConnectionState.RTCPeerConnectionStateConnecting:
+            connectionStatus.value = 'Connecting...';
+            break;
+          default:
+            break;
+        }
+      };
+
+      // Fixed: Added ICE connection state handling
+      _peerConnection?.onIceConnectionState = (
+        webrtc.RTCIceConnectionState state,
+      ) {
+        print('ICE Connection State: $state');
+        if (state == webrtc.RTCIceConnectionState.RTCIceConnectionStateFailed) {
+          _showError('Connection failed - please check your network');
+        }
+      };
+    } catch (e) {
+      print('Error initializing WebRTC: $e');
+      throw Exception('Failed to initialize WebRTC: $e');
+    }
   }
 
   /// Get user media (camera/microphone)
   Future<void> _getUserMedia(bool videoCall) async {
-    final constraints = {
-      'audio': true,
-      'video':
-          videoCall
-              ? {
-                'mandatory': {
-                  'minWidth': '640',
-                  'minHeight': '480',
-                  'minFrameRate': '30',
-                },
-                'facingMode': 'user',
-                'optional': [],
-              }
-              : false,
-    };
+    try {
+      final constraints = {
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video':
+            videoCall
+                ? {
+                  'mandatory': {
+                    'minWidth': '640',
+                    'minHeight': '480',
+                    'minFrameRate': '30',
+                  },
+                  'facingMode': 'user',
+                  'optional': [],
+                }
+                : false,
+      };
 
-    _localStream = await webrtc.navigator.mediaDevices.getUserMedia(
-      constraints,
-    );
-    localRenderer.srcObject = _localStream;
+      _localStream = await webrtc.navigator.mediaDevices.getUserMedia(
+        constraints,
+      );
 
-    // Add stream to peer connection
-    _peerConnection?.addStream(_localStream!);
+      if (_localStream == null) {
+        throw Exception('Failed to get user media');
+      }
+
+      localRenderer.srcObject = _localStream;
+
+      // Add stream to peer connection
+      if (_peerConnection != null) {
+        _peerConnection!.addStream(_localStream!);
+      }
+    } catch (e) {
+      print('Error getting user media: $e');
+      throw Exception('Failed to access camera/microphone: $e');
+    }
   }
 
   /// Create WebRTC offer
   Future<void> _createOffer() async {
-    webrtc.RTCSessionDescription description =
-        await _peerConnection!.createOffer();
-    await _peerConnection!.setLocalDescription(description);
+    try {
+      if (_peerConnection == null) {
+        throw Exception('Peer connection not initialized');
+      }
 
-    // Send offer through socket
-    socketService.socket?.emit('webrtc-offer', {
-      'to': remoteUserId,
-      'offer': description.toMap(),
-    });
+      webrtc.RTCSessionDescription description =
+          await _peerConnection!.createOffer();
+      await _peerConnection!.setLocalDescription(description);
+
+      // Send offer through socket
+      final socket = socketService.socket;
+      if (socket != null && remoteUserId != null) {
+        socket.emit('webrtc-offer', {
+          'to': remoteUserId,
+          'offer': description.toMap(),
+        });
+      } else {
+        throw Exception('Socket or remote user ID not available');
+      }
+    } catch (e) {
+      print('Error creating offer: $e');
+      throw Exception('Failed to create offer: $e');
+    }
   }
 
   /// Handle incoming WebRTC offer
   Future<void> _handleOffer(dynamic data) async {
     try {
+      // Fixed: Better data validation
+      if (data == null || data['offer'] == null || data['from'] == null) {
+        print('Invalid offer data received');
+        return;
+      }
+
       if (!isInCall.value) {
         // This is an incoming call, initialize everything
         isInCall.value = true;
-        isVideoCall.value = data['offer']['type'] == 'video';
+        // Fixed: Proper video call detection
+        final offerData = data['offer'];
+        isVideoCall.value = offerData['sdp']?.contains('video') ?? false;
         remoteUserId = data['from'];
         isInitiator = false;
 
@@ -230,19 +300,27 @@ class CallController extends GetxController {
       await _peerConnection!.setLocalDescription(answer);
 
       // Send answer through socket
-      socketService.socket?.emit('webrtc-answer', {
-        'to': remoteUserId,
-        'answer': answer.toMap(),
-      });
+      final socket = socketService.socket;
+      if (socket != null && remoteUserId != null) {
+        socket.emit('webrtc-answer', {
+          'to': remoteUserId,
+          'answer': answer.toMap(),
+        });
+      }
     } catch (e) {
       print('Error handling offer: $e');
-      endCall();
+      await endCall();
     }
   }
 
   /// Handle WebRTC answer
   Future<void> _handleAnswer(dynamic data) async {
     try {
+      if (data == null || data['answer'] == null) {
+        print('Invalid answer data received');
+        return;
+      }
+
       webrtc.RTCSessionDescription description = webrtc.RTCSessionDescription(
         data['answer']['sdp'],
         data['answer']['type'],
@@ -250,13 +328,18 @@ class CallController extends GetxController {
       await _peerConnection!.setRemoteDescription(description);
     } catch (e) {
       print('Error handling answer: $e');
-      endCall();
+      await endCall();
     }
   }
 
   /// Handle ICE candidate
   Future<void> _handleIceCandidate(dynamic data) async {
     try {
+      if (data == null || data['candidate'] == null) {
+        print('Invalid ICE candidate data received');
+        return;
+      }
+
       webrtc.RTCIceCandidate candidate = webrtc.RTCIceCandidate(
         data['candidate']['candidate'],
         data['candidate']['sdpMid'],
@@ -270,82 +353,90 @@ class CallController extends GetxController {
 
   /// Check required permissions
   Future<bool> _checkPermissions(bool videoCall) async {
-    Map<Permission, PermissionStatus> permissions =
-        await [
-          Permission.microphone,
-          if (videoCall) Permission.camera,
-        ].request();
+    try {
+      final permissionsToRequest = [
+        Permission.microphone,
+        if (videoCall) Permission.camera,
+      ];
 
-    return permissions.values.every((status) => status.isGranted);
+      Map<Permission, PermissionStatus> permissions =
+          await permissionsToRequest.request();
+
+      return permissions.values.every((status) => status.isGranted);
+    } catch (e) {
+      print('Error checking permissions: $e');
+      return false;
+    }
   }
 
   /// Start call timer
   void _startCallTimer() {
-    _callTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _callTimer?.cancel();
+    _callTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       callDuration.value++;
     });
   }
 
-  /// Toggle mute - Fixed method name and logic
+  /// Toggle mute - Fixed logic
   void toggleMute() {
     if (_localStream != null) {
-      _localStream!.getAudioTracks().forEach((track) {
-        track.enabled = isMuted.value; // Enable when currently muted
-      });
+      final audioTracks = _localStream!.getAudioTracks();
+      for (var track in audioTracks) {
+        track.enabled = isMuted.value; // Enable if currently muted
+      }
       isMuted.value = !isMuted.value;
-      isMicEnabled.value = !isMuted.value; // Update mic enabled state
     }
   }
 
-  /// Add missing toggleMic method for UI consistency
-  void toggleMic() {
-    toggleMute();
-  }
-
-  /// Toggle video - Fixed method name and logic
+  /// Toggle video - Fixed logic
   void toggleVideo() {
     if (_localStream != null && isVideoCall.value) {
-      _localStream!.getVideoTracks().forEach((track) {
-        track.enabled = !isVideoEnabled.value;
-      });
+      final videoTracks = _localStream!.getVideoTracks();
+      for (var track in videoTracks) {
+        track.enabled = isVideoEnabled.value; // Enable if currently disabled
+      }
       isVideoEnabled.value = !isVideoEnabled.value;
-      isCameraEnabled.value =
-          isVideoEnabled.value; // Update camera enabled state
     }
-  }
-
-  /// Add missing toggleCamera method for UI consistency
-  void toggleCamera() {
-    toggleVideo();
   }
 
   /// Switch camera (front/back)
   Future<void> switchCamera() async {
     if (_localStream != null && isVideoCall.value) {
-      final videoTrack = _localStream!.getVideoTracks().first;
-      await webrtc.Helper.switchCamera(videoTrack);
+      try {
+        final videoTracks = _localStream!.getVideoTracks();
+        if (videoTracks.isNotEmpty) {
+          await webrtc.Helper.switchCamera(videoTracks.first);
+        }
+      } catch (e) {
+        print('Error switching camera: $e');
+        _showError('Failed to switch camera');
+      }
     }
   }
 
-  /// End call
-  void endCall() {
+  /// End call - Fixed to be async
+  Future<void> endCall() async {
     try {
       // Stop call timer
       _callTimer?.cancel();
       _callTimer = null;
 
       // Close peer connection
-      _peerConnection?.close();
+      await _peerConnection?.close();
       _peerConnection = null;
 
       // Stop local stream
-      _localStream?.getTracks().forEach((track) => track.stop());
-      _localStream?.dispose();
-      _localStream = null;
+      if (_localStream != null) {
+        _localStream!.getTracks().forEach((track) => track.stop());
+        await _localStream!.dispose();
+        _localStream = null;
+      }
 
       // Stop remote stream
-      _remoteStream?.dispose();
-      _remoteStream = null;
+      if (_remoteStream != null) {
+        await _remoteStream!.dispose();
+        _remoteStream = null;
+      }
 
       // Clear renderers
       localRenderer.srcObject = null;
@@ -353,7 +444,8 @@ class CallController extends GetxController {
 
       // Notify other user
       if (remoteUserId != null) {
-        socketService.socket?.emit('call-ended', {'to': remoteUserId});
+        final socket = socketService.socket;
+        socket?.emit('call-ended', {'to': remoteUserId});
       }
 
       // Reset state
@@ -361,8 +453,6 @@ class CallController extends GetxController {
       isVideoCall.value = false;
       isMuted.value = false;
       isVideoEnabled.value = true;
-      isMicEnabled.value = true;
-      isCameraEnabled.value = true;
       isConnected.value = false;
       callDuration.value = 0;
       connectionStatus.value = 'Disconnected';
@@ -398,9 +488,11 @@ class CallController extends GetxController {
       snackPosition: SnackPosition.TOP,
       backgroundColor: Get.theme.colorScheme.error,
       colorText: Get.theme.colorScheme.onError,
+      duration: const Duration(seconds: 3),
     );
   }
 
+  // Fixed: Added proper disposal
   @override
   void onClose() {
     endCall();

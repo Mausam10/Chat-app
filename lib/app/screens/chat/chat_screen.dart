@@ -743,7 +743,7 @@ class _ChatScreenState extends State<ChatScreen>
       Get.to(
         () => CallScreen(
           receiverId: receiverId,
-          receiverName: receiverName,
+          receiverName: receiverName, // ✅ Now supported
           isVideoCall: isVideoCall,
         ),
       );

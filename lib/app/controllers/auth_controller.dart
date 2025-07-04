@@ -9,7 +9,7 @@ class AuthController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxBool isLoggedIn = false.obs;
 
-  final String baseUrl = 'http://192.168.1.70:5001/api';
+  final String baseUrl = 'http://172.16.3.39:5001/api';
 
   @override
   void onInit() {

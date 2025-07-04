@@ -18,8 +18,8 @@ class LoginController extends GetxController {
     // Dynamic base URL based on platform
     final String baseUrl =
         kIsWeb
-            ? "http://192.168.1.70:5001"
-            : "http://192.168.1.70:5001"; // use real IP for all devices
+            ? "http://172.16.3.128:5001"
+            : "http://172.16.3.128:5001"; // use real IP for all devices
 
     final Uri url = Uri.parse("$baseUrl/api/auth/login");
     try {

@@ -15,7 +15,7 @@ class ApiService {
       // return 'http://192.168.56.1:5001';
     } else if (Platform.isIOS) {
       // For iOS simulator or device, use your local network IP
-      return 'http://172.16.7.243:5001';
+      return 'http://172.16.3.39:5001';
     } else {
       // Fallback to localhost for other platforms
       return 'http://localhost:5001';

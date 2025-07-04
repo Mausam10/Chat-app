@@ -22,7 +22,7 @@ class HomeController extends GetxController {
   Timer? _periodicRefreshTimer;
 
   String? get currentUserId => storage.read('user_id');
-  String get baseUrl => 'http://192.168.1.70:5001/api';
+  String get baseUrl => 'http://172.16.3.128:5001/api';
 
   @override
   void onInit() {

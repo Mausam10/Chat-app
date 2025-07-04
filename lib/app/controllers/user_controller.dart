@@ -13,7 +13,7 @@ class UsersController extends GetxController {
 
   final storage = GetStorage();
   final String baseUrl =
-      "http://192.168.1.70:5001/api/users"; // Replace with your API URL
+      "http://172.16.3.128:5001/api/users"; // Replace with your API URL
 
   /// Updates the online users list from socket event
   void updateOnlineUsers(List<String> userIds) {

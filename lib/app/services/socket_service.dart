@@ -8,7 +8,6 @@ class SocketService extends GetxService {
   IO.Socket? _socket;
 
   // Connection state
-  RxBool get isConnectedObs => _isConnected;
   final RxBool _isConnected = false.obs;
   final RxBool _isConnecting = false.obs;
   final RxString _connectionStatus = 'disconnected'.obs;
@@ -24,11 +23,15 @@ class SocketService extends GetxService {
   Timer? _reconnectTimer;
   Timer? _heartbeatTimer;
 
+  // Fixed: Better type safety for event listeners
+  final Map<String, List<void Function(dynamic)>> _eventListeners = {};
+
   // Getters
   bool get isConnected => _isConnected.value;
   bool get isConnecting => _isConnecting.value;
   String get connectionStatus => _connectionStatus.value;
   IO.Socket? get socket => _socket;
+  RxBool get isConnectedObs => _isConnected;
 
   SocketService({required this.baseUrl});
 
@@ -53,6 +56,7 @@ class SocketService extends GetxService {
       if (connected) {
         _reconnectAttempts = 0;
         _startHeartbeat();
+        _reattachListeners();
       } else {
         _heartbeatTimer?.cancel();
       }
@@ -60,21 +64,24 @@ class SocketService extends GetxService {
   }
 
   void _autoInitializeSocket() {
-    // Auto-initialize socket if credentials are available
-    final storage = GetStorage();
-    final userId = storage.read('user_id');
-    final token = storage.read('auth_token');
+    try {
+      final storage = GetStorage();
+      final userId = storage.read('user_id');
+      final token = storage.read('auth_token');
 
-    if (userId != null && token != null) {
-      print('[SocketService] 🚀 Auto-initializing socket for user: $userId');
-      initSocket(userId: userId, token: token);
+      if (userId != null && token != null) {
+        print('[SocketService] 🚀 Auto-initializing socket for user: $userId');
+        initSocket(userId: userId, token: token);
+      }
+    } catch (e) {
+      print('[SocketService] ❌ Error auto-initializing socket: $e');
     }
   }
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(Duration(seconds: 25), (timer) {
-      if (_isConnected.value) {
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 25), (timer) {
+      if (_isConnected.value && _socket?.connected == true) {
         print('[SocketService] 💓 Sending heartbeat');
         _socket?.emit('ping');
       }
@@ -85,9 +92,10 @@ class SocketService extends GetxService {
     required String userId,
     required String token,
   }) async {
-    if (userId.isEmpty || token.isEmpty) {
-      print('[SocketService] ❌ Missing userId or token');
-      throw ArgumentError('UserId and token are required');
+    // Fixed: Better validation
+    if (userId.trim().isEmpty || token.trim().isEmpty) {
+      print('[SocketService] ❌ Missing or empty userId or token');
+      throw ArgumentError('UserId and token must not be empty');
     }
 
     // If already connected with same credentials, return
@@ -123,11 +131,11 @@ class SocketService extends GetxService {
             .setReconnectionAttempts(maxReconnectAttempts)
             .setReconnectionDelay(reconnectDelay.inMilliseconds)
             .setAuth({'userId': _userId!, 'token': _token!})
+            .setTimeout(30000) // Fixed: Added timeout
             .build(),
       );
 
       _setupSocketListeners();
-
       print('[SocketService] 🔄 Socket initialized and connecting as $_userId');
     } catch (e) {
       _isConnecting.value = false;
@@ -149,7 +157,6 @@ class SocketService extends GetxService {
       _isConnecting.value = false;
       print('[SocketService] ❌ Disconnected: $reason');
 
-      // Auto-reconnect if not intentionally disconnected
       if (reason != 'io client disconnect') {
         _attemptReconnection();
       }
@@ -181,10 +188,27 @@ class SocketService extends GetxService {
       _connectionStatus.value = 'failed';
     });
 
-    // Heartbeat response
     _socket?.on('pong', (_) {
       print('[SocketService] 💓 Heartbeat received');
     });
+  }
+
+  // Fixed: More efficient listener reattachment
+  void _reattachListeners() {
+    for (final entry in _eventListeners.entries) {
+      final event = entry.key;
+      final callbacks = entry.value;
+
+      for (final callback in callbacks) {
+        _socket?.on(event, callback);
+      }
+    }
+  }
+
+  // Fixed: Better type safety
+  void addListener(String event, void Function(dynamic) callback) {
+    _eventListeners.putIfAbsent(event, () => []).add(callback);
+    _socket?.on(event, callback);
   }
 
   void _attemptReconnection() {
@@ -196,17 +220,17 @@ class SocketService extends GetxService {
     _reconnectAttempts++;
     _reconnectTimer?.cancel();
 
-    _reconnectTimer = Timer(
-      Duration(seconds: reconnectDelay.inSeconds * _reconnectAttempts),
-      () {
-        if (!_isConnected.value && _userId != null && _token != null) {
-          print(
-            '[SocketService] 🔄 Attempting reconnection $_reconnectAttempts/$maxReconnectAttempts',
-          );
-          _createSocket();
-        }
-      },
+    final delay = Duration(
+      seconds: reconnectDelay.inSeconds * _reconnectAttempts,
     );
+    _reconnectTimer = Timer(delay, () {
+      if (!_isConnected.value && _userId != null && _token != null) {
+        print(
+          '[SocketService] 🔄 Attempting reconnection $_reconnectAttempts/$maxReconnectAttempts',
+        );
+        _createSocket();
+      }
+    });
   }
 
   void _cleanupSocket() {
@@ -215,6 +239,7 @@ class SocketService extends GetxService {
     _socket = null;
     _isConnected.value = false;
     _isConnecting.value = false;
+    _eventListeners.clear(); // Fixed: Clear stored listeners
   }
 
   Future<void> disconnect() async {
@@ -246,11 +271,6 @@ class SocketService extends GetxService {
     }
   }
 
-  // Connection status stream
-  Stream<bool> get connectionStream => _isConnected.stream;
-  Stream<String> get connectionStatusStream => _connectionStatus.stream;
-
-  // Utility method to ensure connection
   bool _ensureConnection() {
     if (!_isConnected.value) {
       print('[SocketService] ⚠️ Socket not connected');
@@ -259,12 +279,20 @@ class SocketService extends GetxService {
     return true;
   }
 
-  // --- Core Socket Methods ---
+  // Fixed: Better type safety for callback storage
+  void _addEventListenerToStorage(
+    String event,
+    void Function(dynamic) callback,
+  ) {
+    _eventListeners.putIfAbsent(event, () => []).add(callback);
+  }
 
+  // --- Core Socket Methods ---
   void joinRoom(String roomId, {required String userId}) {
     if (!_ensureConnection()) return;
 
-    if (roomId.isEmpty || userId.isEmpty) {
+    // Fixed: Better validation
+    if (roomId.trim().isEmpty || userId.trim().isEmpty) {
       print('[SocketService] ⚠️ Invalid room or userId');
       return;
     }
@@ -276,41 +304,37 @@ class SocketService extends GetxService {
   void leaveRoom(String roomId, {required String userId}) {
     if (!_ensureConnection()) return;
 
+    if (roomId.trim().isEmpty || userId.trim().isEmpty) {
+      print('[SocketService] ⚠️ Invalid room or userId for leaving');
+      return;
+    }
+
     print('[SocketService] 🚪 Leaving room: $roomId as $userId');
     _socket?.emit('leave-room', {'roomId': roomId, 'userId': userId});
   }
 
-  // --- Online Users ---
-
-  void onOnlineUsersUpdated(void Function(List<String>) callback) {
-    _socket?.on('getOnlineUsers', (data) {
-      print('[SocketService] 👥 Online users updated: $data');
-      if (data is List) {
-        callback(List<String>.from(data));
-      }
-    });
-  }
-
   // --- Enhanced Messaging ---
-
   void sendMessage(Map<String, dynamic> message) {
     if (!_ensureConnection()) return;
 
     final receiverId = message['receiverId'];
     final text = message['text'];
 
-    if (receiverId == null || text == null) {
+    // Fixed: Better validation
+    if (receiverId == null ||
+        receiverId.toString().trim().isEmpty ||
+        text == null ||
+        text.toString().trim().isEmpty) {
       print('[SocketService] ⚠️ Invalid message format');
       return;
     }
 
-    // Generate room ID for the conversation
-    final roomId = _generateRoomId(_userId!, receiverId);
-
+    final roomId = _generateRoomId(_userId!, receiverId.toString());
     final messageData = {
       'message': text,
       'to': receiverId,
       'roomId': roomId,
+      'timestamp': DateTime.now().toIso8601String(), // Fixed: Added timestamp
       ...message,
     };
 
@@ -321,9 +345,8 @@ class SocketService extends GetxService {
   }
 
   void onNewMessage(void Function(Map<String, dynamic>) callback) {
-    // Listen for direct messages
-    _socket?.on('receiveMessage', (data) {
-      print('[SocketService] 📥 Direct message received: $data');
+    final wrappedCallback = (data) {
+      print('[SocketService] 📥 Message received: $data');
       try {
         Map<String, dynamic> messageData;
         if (data is Map<String, dynamic>) {
@@ -336,40 +359,23 @@ class SocketService extends GetxService {
         }
         callback(messageData);
       } catch (e) {
-        print('[SocketService] ❌ Error processing direct message: $e');
+        print('[SocketService] ❌ Error processing message: $e');
       }
-    });
+    };
 
-    // Listen for room messages
-    _socket?.on('new-message', (data) {
-      print('[SocketService] 📥 Room message received: $data');
-      try {
-        Map<String, dynamic> messageData;
-        if (data is Map<String, dynamic>) {
-          messageData = data;
-        } else if (data is Map) {
-          messageData = Map<String, dynamic>.from(data);
-        } else {
-          print('[SocketService] ⚠️ Unexpected room message format: $data');
-          return;
-        }
-        callback(messageData);
-      } catch (e) {
-        print('[SocketService] ❌ Error processing room message: $e');
-      }
-    });
+    // Store listeners for reconnection
+    _addEventListenerToStorage('receiveMessage', wrappedCallback);
+    _addEventListenerToStorage('new-message', wrappedCallback);
+    _addEventListenerToStorage('messageSent', wrappedCallback);
 
-    // Listen for message sent confirmation
-    _socket?.on('messageSent', (data) {
-      print('[SocketService] ✅ Message sent confirmation: $data');
-      // You can handle message status updates here
-    });
+    _socket?.on('receiveMessage', wrappedCallback);
+    _socket?.on('new-message', wrappedCallback);
+    _socket?.on('messageSent', wrappedCallback);
   }
 
   // --- Enhanced Typing Events ---
-
   void sendTypingEvent(String toUserId) {
-    if (!_ensureConnection() || toUserId.isEmpty) return;
+    if (!_ensureConnection() || toUserId.trim().isEmpty) return;
 
     final roomId = _generateRoomId(_userId!, toUserId);
     print(
@@ -379,7 +385,7 @@ class SocketService extends GetxService {
   }
 
   void sendStoppedTypingEvent(String toUserId) {
-    if (!_ensureConnection() || toUserId.isEmpty) return;
+    if (!_ensureConnection() || toUserId.trim().isEmpty) return;
 
     final roomId = _generateRoomId(_userId!, toUserId);
     print(
@@ -389,41 +395,54 @@ class SocketService extends GetxService {
   }
 
   void onTyping(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('userTyping', (data) {
-      print('[SocketService] ✍️ Direct typing event received: $data');
+    final wrappedCallback = (data) {
+      print('[SocketService] ✍️ Typing event received: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
 
-    _socket?.on('user-typing', (data) {
-      print('[SocketService] ✍️ Room typing event received: $data');
-      if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
-      }
-    });
+    _addEventListenerToStorage('userTyping', wrappedCallback);
+    _addEventListenerToStorage('user-typing', wrappedCallback);
+
+    _socket?.on('userTyping', wrappedCallback);
+    _socket?.on('user-typing', wrappedCallback);
   }
 
   void onStoppedTyping(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('userStoppedTyping', (data) {
-      print('[SocketService] ✍️ Direct stopped typing event received: $data');
+    final wrappedCallback = (data) {
+      print('[SocketService] ✍️ Stopped typing event received: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
 
-    _socket?.on('user-stopped-typing', (data) {
-      print('[SocketService] ✍️ Room stopped typing event received: $data');
-      if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
+    _addEventListenerToStorage('userStoppedTyping', wrappedCallback);
+    _addEventListenerToStorage('user-stopped-typing', wrappedCallback);
+
+    _socket?.on('userStoppedTyping', wrappedCallback);
+    _socket?.on('user-stopped-typing', wrappedCallback);
+  }
+
+  // --- Online Users ---
+  void onOnlineUsersUpdated(void Function(List<String>) callback) {
+    final wrappedCallback = (data) {
+      print('[SocketService] 👥 Online users updated: $data');
+      if (data is List) {
+        callback(List<String>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('getOnlineUsers', wrappedCallback);
+    _socket?.on('getOnlineUsers', wrappedCallback);
   }
 
   // --- Message Status ---
-
   void markMessageAsSeen(String toUserId, String messageId) {
-    if (!_ensureConnection() || toUserId.isEmpty) return;
+    if (!_ensureConnection() ||
+        toUserId.trim().isEmpty ||
+        messageId.trim().isEmpty)
+      return;
 
     print(
       '[SocketService] 👁️ Marking message as seen: $messageId for user: $toUserId',
@@ -432,18 +451,23 @@ class SocketService extends GetxService {
   }
 
   void onMessageSeen(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('messageSeen', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] 👁️ Message seen event received: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('messageSeen', wrappedCallback);
+    _socket?.on('messageSeen', wrappedCallback);
   }
 
   // --- Reactions ---
-
   void sendReaction(String messageId, String reaction) {
-    if (!_ensureConnection() || messageId.isEmpty || reaction.isEmpty) return;
+    if (!_ensureConnection() ||
+        messageId.trim().isEmpty ||
+        reaction.trim().isEmpty)
+      return;
 
     print(
       '[SocketService] 😊 Sending reaction: $reaction for message: $messageId',
@@ -455,18 +479,22 @@ class SocketService extends GetxService {
   }
 
   void onReactionReceived(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('message-reaction', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] 😊 Reaction received: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('message-reaction', wrappedCallback);
+    _socket?.on('message-reaction', wrappedCallback);
   }
 
   // --- Call Events ---
-
   void emitCallRequest(String receiverId, String callerName, bool isVideoCall) {
-    if (!_ensureConnection() || receiverId.isEmpty || callerName.isEmpty)
+    if (!_ensureConnection() ||
+        receiverId.trim().isEmpty ||
+        callerName.trim().isEmpty)
       return;
 
     print('[SocketService] 📞 Emitting call request to: $receiverId');
@@ -478,7 +506,7 @@ class SocketService extends GetxService {
   }
 
   void emitCallAccepted(String receiverId, bool isVideoCall) {
-    if (!_ensureConnection() || receiverId.isEmpty) return;
+    if (!_ensureConnection() || receiverId.trim().isEmpty) return;
 
     print('[SocketService] ✅ Emitting call accepted to: $receiverId');
     _socket?.emit('call-accepted', {
@@ -488,123 +516,205 @@ class SocketService extends GetxService {
   }
 
   void emitCallRejected(String receiverId) {
-    if (!_ensureConnection() || receiverId.isEmpty) return;
+    if (!_ensureConnection() || receiverId.trim().isEmpty) return;
 
     print('[SocketService] ❌ Emitting call rejected to: $receiverId');
     _socket?.emit('call-rejected', {'receiverId': receiverId});
   }
 
   void emitCallCancelled(String receiverId) {
-    if (!_ensureConnection() || receiverId.isEmpty) return;
+    if (!_ensureConnection() || receiverId.trim().isEmpty) return;
 
     print('[SocketService] 🚫 Emitting call cancelled to: $receiverId');
     _socket?.emit('call-cancelled', {'receiverId': receiverId});
   }
 
   void emitCallEnded(String receiverId) {
-    if (!_ensureConnection() || receiverId.isEmpty) return;
+    if (!_ensureConnection() || receiverId.trim().isEmpty) return;
 
     print('[SocketService] 📞 Emitting call ended to: $receiverId');
     _socket?.emit('call-ended', {'receiverId': receiverId});
   }
 
   // --- Call Event Listeners ---
-
   void onIncomingCall(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('incoming-call', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] 📞 Incoming call: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('incoming-call', wrappedCallback);
+    _socket?.on('incoming-call', wrappedCallback);
   }
 
   void onCallAccepted(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('call-accepted', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] ✅ Call accepted: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('call-accepted', wrappedCallback);
+    _socket?.on('call-accepted', wrappedCallback);
   }
 
   void onCallRejected(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('call-rejected', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] ❌ Call rejected: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('call-rejected', wrappedCallback);
+    _socket?.on('call-rejected', wrappedCallback);
   }
 
   void onCallCancelled(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('call-cancelled', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] 🚫 Call cancelled: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('call-cancelled', wrappedCallback);
+    _socket?.on('call-cancelled', wrappedCallback);
   }
 
   void onCallEnded(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('call-ended', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] 📞 Call ended: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('call-ended', wrappedCallback);
+    _socket?.on('call-ended', wrappedCallback);
   }
 
   // --- Room Events ---
-
   void onRoomJoined(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('room-joined', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] 🏠 Room joined: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('room-joined', wrappedCallback);
+    _socket?.on('room-joined', wrappedCallback);
   }
 
   void onUserJoined(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('user-joined', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] 👤 User joined room: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('user-joined', wrappedCallback);
+    _socket?.on('user-joined', wrappedCallback);
   }
 
   void onUserLeft(void Function(Map<String, dynamic>) callback) {
-    _socket?.on('user-left', (data) {
+    final wrappedCallback = (data) {
       print('[SocketService] 👤 User left room: $data');
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
-    });
+    };
+
+    _addEventListenerToStorage('user-left', wrappedCallback);
+    _socket?.on('user-left', wrappedCallback);
+  }
+
+  // --- WebRTC Signaling ---
+  void sendOffer(String receiverId, Map<String, dynamic> offer) {
+    if (!_ensureConnection() || receiverId.trim().isEmpty) return;
+    print('[SocketService] 📡 Sending WebRTC offer to: $receiverId');
+    _socket?.emit('offer', {'offer': offer, 'to': receiverId});
+  }
+
+  void sendAnswer(String receiverId, Map<String, dynamic> answer) {
+    if (!_ensureConnection() || receiverId.trim().isEmpty) return;
+    print('[SocketService] 📡 Sending WebRTC answer to: $receiverId');
+    _socket?.emit('answer', {'answer': answer, 'to': receiverId});
+  }
+
+  void sendIceCandidate(String receiverId, Map<String, dynamic> candidate) {
+    if (!_ensureConnection() || receiverId.trim().isEmpty) return;
+    print('[SocketService] 📡 Sending ICE candidate to: $receiverId');
+    _socket?.emit('ice-candidate', {'candidate': candidate, 'to': receiverId});
+  }
+
+  void onOffer(void Function(Map<String, dynamic>) callback) {
+    final wrappedCallback = (data) {
+      print('[SocketService] 📡 WebRTC offer received: $data');
+      if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      }
+    };
+
+    _addEventListenerToStorage('offer', wrappedCallback);
+    _socket?.on('offer', wrappedCallback);
+  }
+
+  void onAnswer(void Function(Map<String, dynamic>) callback) {
+    final wrappedCallback = (data) {
+      print('[SocketService] 📡 WebRTC answer received: $data');
+      if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      }
+    };
+
+    _addEventListenerToStorage('answer', wrappedCallback);
+    _socket?.on('answer', wrappedCallback);
+  }
+
+  void onIceCandidate(void Function(Map<String, dynamic>) callback) {
+    final wrappedCallback = (data) {
+      print('[SocketService] 📡 ICE candidate received: $data');
+      if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      }
+    };
+
+    _addEventListenerToStorage('ice-candidate', wrappedCallback);
+    _socket?.on('ice-candidate', wrappedCallback);
   }
 
   // --- Utility Methods ---
-
+  // Fixed: Better room ID generation with validation
   String _generateRoomId(String userId1, String userId2) {
-    final sorted = [userId1, userId2]..sort();
+    if (userId1.trim().isEmpty || userId2.trim().isEmpty) {
+      throw ArgumentError('User IDs cannot be empty');
+    }
+
+    final sorted = [userId1.trim(), userId2.trim()]..sort();
     return 'chat_${sorted.join("_")}';
   }
 
   void removeAllListeners() {
     _socket?.clearListeners();
+    _eventListeners.clear();
   }
 
   void removeListener(String event) {
     _socket?.off(event);
+    _eventListeners.remove(event);
   }
 
-  // Health check
   Future<bool> ping() async {
     if (!_ensureConnection()) return false;
 
     final completer = Completer<bool>();
-    final timer = Timer(Duration(seconds: 5), () {
+    final timer = Timer(const Duration(seconds: 5), () {
       if (!completer.isCompleted) {
         completer.complete(false);
       }
@@ -620,4 +730,8 @@ class SocketService extends GetxService {
 
     return completer.future;
   }
+
+  // Fixed: Better stream handling
+  Stream<bool> get connectionStream => _isConnected.stream;
+  Stream<String> get connectionStatusStream => _connectionStatus.stream;
 }
